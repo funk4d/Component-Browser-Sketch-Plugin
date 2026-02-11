@@ -10,7 +10,7 @@
   ],
   "name": "Component Browser",
   "identifier": "com.funkyplugins.componentbrowser",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Browse and insert Symbols/Components",
   "author": "Dmytro Shevchuk",
   "icon": "icon.png",

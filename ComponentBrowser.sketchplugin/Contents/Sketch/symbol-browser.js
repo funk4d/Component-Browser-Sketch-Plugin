@@ -481,7 +481,7 @@ function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
   
   // Close window after insertion
   const threadDictionary = NSThread.mainThread().threadDictionary();
-  const win = threadDictionary["com.funkyplugins.symbolbrowser.window"];
+  const win = threadDictionary["com.funkyplugins.componentbrowser.window"];
   if (win) {
     win.close();
   }
@@ -620,8 +620,8 @@ function generateSymbolPreview(symbolMaster, size) {
 function closeWindow() {
   try {
     const threadDictionary = NSThread.mainThread().threadDictionary();
-    const identifier = "com.funkyplugins.symbolbrowser.window";
-    const delegateIdentifier = "com.funkyplugins.symbolbrowser.delegate";
+    const identifier = "com.funkyplugins.componentbrowser.window";
+    const delegateIdentifier = "com.funkyplugins.componentbrowser.delegate";
     
     if (threadDictionary[identifier]) {
       if (COScript.currentCOScript()) {
