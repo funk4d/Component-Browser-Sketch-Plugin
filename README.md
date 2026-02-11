@@ -6,7 +6,6 @@ A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Compon
 
 ## Features
 
-- ⚡ **Lightning Fast** — Async loading with spinner, no UI freezing
 - 🔍 **Smart Search** — Instantly filter symbols by name
 - 🎨 **Source Filtering** — Switch between All, Local, and Library sources
 - *(coming soon)* 🖼️ **Preview Thumbnails** — Visual previews for library symbols 
@@ -53,6 +52,13 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 - **Search as you type** — Start typing to filter symbols instantly
 - **Quick library switch** — Use `Tab` to cycle through sources without leaving the keyboard
 - **Drag to move** — Grab the search bar to reposition the window
+
+## Roadmap
+
+- [ ] Add symbol preview thumbnails
+- [ ] Add customization (settings/preferences)
+- [ ] Integrate search for free icon libraries (e.g., Remix Icon)
+- [ ] Add more commands
 
 ## Credits
 
