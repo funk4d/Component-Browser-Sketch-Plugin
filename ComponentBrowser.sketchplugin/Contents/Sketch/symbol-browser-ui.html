@@ -66,7 +66,7 @@
     
     .search-input {
       width: 100%;
-      padding: 14px 20px;
+      padding: 20px 24px 20px 64px;
       border: none;
       font-size: 17px;
       outline: none;
@@ -88,6 +88,17 @@
     .search-wrapper {
       position: relative;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+    }
+    
+    .search-icon {
+      position: absolute;
+      left: 16px;
+      width: 32px;
+      height: 32px;
+      pointer-events: none;
+      z-index: 20;
     }
     
     .search-loader {
@@ -140,7 +151,7 @@
       font-weight: 500;
       color: var(--text-secondary);
       background: var(--bg-primary);
-      border: 1px solid var(--border-color);
+      border: 1px solid var(--bg-primary);
       border-radius: 4px;
       cursor: pointer;
       white-space: nowrap;
@@ -153,9 +164,9 @@
     }
     
     .source-btn.active {
-      background: var(--accent-color);
-      border-color: var(--accent-color);
-      color: #fff;
+      background: var(--bg-secondary);
+      border-color: var(--border-color);
+      color: var(--text-primary);
     }
     
     .list-container {
@@ -248,6 +259,15 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    
+    .symbol-name .match {
+      opacity: 1;
+      font-weight: 600;
+    }
+    
+    .symbol-name .faded {
+      opacity: 0.5;
     }
     
     .symbol-library {
@@ -398,6 +418,7 @@
 </head>
 <body>
   <div class="search-wrapper">
+    <svg class="search-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><defs><path id="a" d="M8 0h16a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8Z"/></defs><g fill="none" fill-rule="evenodd"><use href="#a" fill="#535DFF"/><path fill="#FFF" stroke="#535DFF" stroke-width=".809" d="m24.184 7.911-3.388 11.594a2.023 2.023 0 0 1-1.284 1.288l-10.72 3.565a.91.91 0 0 1-1.187-.721l3.602-11.15a2.023 2.023 0 0 1 1.28-1.28l10.72-3.565a.91.91 0 0 1 .977.27Zm-8.2 6.252c-.504 0-.959.204-1.288.533-.33.33-.533.784-.533 1.287 0 .503.204.958.533 1.287.33.33.784.533 1.287.533.503 0 .958-.203 1.287-.533.33-.33.534-.784.534-1.287 0-.503-.204-.958-.534-1.287a1.815 1.815 0 0 0-1.287-.533Z"/></g></svg>
     <input type="text" class="search-input" id="searchInput" placeholder="Search symbols..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <div class="search-loader" id="searchLoader"></div>
   </div>
@@ -605,14 +626,15 @@
         renderSourceFilter();
       }
       
-      // Focus search input after a short delay to ensure rendering is complete
-      setTimeout(() => {
-        searchInput.focus();
-        searchInput.select();
-      }, 100);
+      // Focus and select search input immediately (don't wait for symbols)
+      searchInput.focus();
+      searchInput.select();
     };
     
     function renderSymbols() {
+      const query = searchInput.value.toLowerCase().trim();
+      const queryParts = query ? query.replace(/[\/\-_]/g, ' ').split(/\s+/).filter(p => p.length > 0) : [];
+      
       symbolsList.innerHTML = filteredSymbols.map((symbol, index) => {
         const isLocal = symbol.isOriginallyLocal === true;
         const isSelected = index === selectedIndex;
@@ -632,6 +654,10 @@
         
         const iconSvg = ICONS[iconKey];
         
+        // Highlight matching parts in name
+        const displayName = escapeHtml(symbol.name).replace(/\//g, ' → ');
+        const highlightedName = highlightMatches(displayName, queryParts);
+        
         return `
           <li class="symbol-item ${isSelected ? 'selected' : ''}" 
               data-index="${index}"
@@ -642,11 +668,32 @@
               ${iconSvg}
             </div>
             <div class="symbol-info">
-              <div class="symbol-name">${escapeHtml(symbol.name)}</div>
+              <div class="symbol-name">${highlightedName}</div>
               <div class="symbol-library">${escapeHtml(symbol.libraryName || 'Local')}</div>
             </div>
           </li>
         `;
+      }).join('');
+    }
+    
+    function highlightMatches(text, queryParts) {
+      if (!queryParts || queryParts.length === 0) {
+        return `<span class="faded">${text}</span>`;
+      }
+      
+      // Create a regex that matches any of the query parts
+      // Escape special regex characters in query parts
+      const escapedParts = queryParts.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const regex = new RegExp(`(${escapedParts.join('|')})`, 'gi');
+      
+      // Split text by matches and wrap each part
+      const parts = text.split(regex);
+      return parts.map((part, i) => {
+        if (!part) return '';
+        const isMatch = queryParts.some(p => part.toLowerCase() === p.toLowerCase());
+        return isMatch 
+          ? `<span class="match">${part}</span>`
+          : `<span class="faded">${part}</span>`;
       }).join('');
     }
     
@@ -706,6 +753,11 @@
     function applyFilters() {
       const query = searchInput.value.toLowerCase().trim();
       
+      // Save currently selected symbol ID before filtering
+      const previousSelectedId = selectedIndex >= 0 && filteredSymbols[selectedIndex] 
+        ? filteredSymbols[selectedIndex].id 
+        : null;
+      
       // First filter by source
       let sourceFiltered = allSymbols;
       if (currentSourceFilter === 'Local') {
@@ -715,13 +767,27 @@
         sourceFiltered = allSymbols.filter(symbol => symbol.libraryName === currentSourceFilter);
       }
       
-      // Then filter by search query (only in name, not library)
+      // Then filter by search query (fuzzy search - spaces match any separator)
       filteredSymbols = sourceFiltered.filter(symbol => {
         if (!query) return true;
-        return symbol.name.toLowerCase().includes(query);
+        // Normalize: replace / - _ with spaces for fuzzy matching
+        const normalizedName = symbol.name.toLowerCase().replace(/[\/\-_]/g, ' ');
+        const normalizedQuery = query.replace(/[\/\-_]/g, ' ');
+        // Split query by spaces and check if all parts match
+        const queryParts = normalizedQuery.split(/\s+/).filter(p => p.length > 0);
+        if (queryParts.length === 0) return true;
+        return queryParts.every(part => normalizedName.includes(part));
       });
       
-      selectedIndex = filteredSymbols.length > 0 ? 0 : -1;
+      // Try to restore previous selection by ID only if search query exists
+      // If no search query, always reset to first item when switching sources
+      if (query && previousSelectedId && filteredSymbols.length > 0) {
+        const previousIndex = filteredSymbols.findIndex(s => s.id === previousSelectedId);
+        selectedIndex = previousIndex >= 0 ? previousIndex : 0;
+      } else {
+        selectedIndex = filteredSymbols.length > 0 ? 0 : -1;
+      }
+      
       renderSymbols();
       updateStats();
       updatePreview();
