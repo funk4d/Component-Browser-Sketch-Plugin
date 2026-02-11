@@ -9,7 +9,7 @@ A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Compon
 - ⚡ **Lightning Fast** — Async loading with spinner, no UI freezing
 - 🔍 **Smart Search** — Instantly filter symbols by name
 - 🎨 **Source Filtering** — Switch between All, Local, and Library sources
-- 🖼️ **Preview Thumbnails** — Visual previews for library symbols *(coming soon)*
+- *(coming soon)* 🖼️ **Preview Thumbnails** — Visual previews for library symbols 
 - ⌨️ **Keyboard First** — Navigate and insert without touching the mouse
 - 🔄 **Batch Replace** — Replace multiple selected layers at once
 
