@@ -1,0 +1,27 @@
+{
+  "commands": [
+    {
+      "name": "🧭 Component Browser",
+      "identifier": "browse-components",
+      "script": "symbol-browser.js",
+      "handler": "onRun",
+      "shortcut": "cmd shift ;"
+    }
+  ],
+  "name": "Component Browser",
+  "identifier": "com.funkyplugins.componentbrowser",
+  "version": "1.0.0",
+  "description": "Browse and insert Symbols/Components",
+  "author": "Dmytro Shevchuk",
+  "icon": "icon.png",
+  "compatibleVersion": 3,
+  "bundleVersion": 1,
+  "menu": {
+    "title": "Component Browser",
+    "isRoot": true,
+    "items": [
+      "browse-components"
+    ]
+  },
+  "disableCocoaScriptPreprocessor": true
+}

@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    /* CSS Variables for theming */
+    :root {
+      --accent-color: #535DFF;
+      --accent-hover: #4a52e0;
+      
+      /* Dark theme (default) */
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #2d2d2d;
+      --bg-tertiary: #252525;
+      --bg-input: #1e1e1e;
+      --bg-input-focus: #323232;
+      --text-primary: #e0e0e0;
+      --text-secondary: #888;
+      --text-tertiary: #ccc;
+      --border-color: #3d3d3d;
+      --item-hover: #2d2d2d;
+      --item-selected-text: #fff;
+      --library-text: #888;
+      --key-bg: #2d2d2d;
+      --key-border: #4d4d4d;
+    }
+    
+    /* Light theme */
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg-primary: #f5f5f5;
+        --bg-secondary: #ffffff;
+        --bg-tertiary: #f0f0f0;
+        --bg-input: #ffffff;
+        --bg-input-focus: #f8f8f8;
+        --text-primary: #333333;
+        --text-secondary: #666666;
+        --text-tertiary: #555555;
+        --border-color: #e0e0e0;
+        --item-hover: #e8e8e8;
+        --item-selected-text: #ffffff;
+        --library-text: #888888;
+        --key-bg: #e8e8e8;
+        --key-border: #cccccc;
+      }
+    }
+    
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    
+    .search-input {
+      width: 100%;
+      padding: 14px 20px;
+      border: none;
+      font-size: 17px;
+      outline: none;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      flex-shrink: 0;
+      z-index: 10;
+      -webkit-app-region: drag;
+    }
+    
+    .search-input.dragging {
+      cursor: grabbing;
+    }
+    
+    .search-input::placeholder {
+      color: var(--text-secondary);
+    }
+    
+    .search-wrapper {
+      position: relative;
+      flex-shrink: 0;
+    }
+    
+    .search-loader {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      width: 16px;
+      height: 16px;
+      margin-top: -8px;
+      border: 2px solid var(--border-color);
+      border-top-color: var(--accent-color);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+    
+    .search-loader.visible {
+      display: block;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .stats {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-align: center;
+      flex-shrink: 0;
+    }
+    
+    .source-filter {
+      display: flex;
+      gap: 4px;
+      padding: 6px 12px;
+      background: var(--bg-primary);
+      border-bottom: 1px solid var(--border-color);
+      flex-shrink: 0;
+      overflow-x: auto;
+      margin-top:-4px;
+    }
+    
+    .source-filter::-webkit-scrollbar {
+      display: none;
+    }
+    
+    .source-btn {
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    
+    .source-btn:hover {
+      background: var(--item-hover);
+      color: var(--text-tertiary);
+    }
+    
+    .source-btn.active {
+      background: var(--accent-color);
+      border-color: var(--accent-color);
+      color: #fff;
+    }
+    
+    .list-container {
+      flex: 1;
+      overflow-y: auto;
+      background: var(--bg-primary);
+    }
+    
+    .symbols-list {
+      list-style: none;
+    }
+    
+    .symbol-item {
+      padding: 10px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: background 0.15s;
+      color: var(--text-primary);
+    }
+    
+    /* Hover disabled - was causing unwanted highlighting */
+    /* .symbol-item:hover {
+      background: var(--item-hover);
+    } */
+    
+    .symbol-item.selected {
+      background: var(--accent-color);
+      color: var(--item-selected-text);
+    }
+    
+    .symbol-item.selected .symbol-library {
+      color: rgba(255,255,255,0.7);
+    }
+    
+    .symbol-color {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      background-color: transparent;
+    }
+    
+    .symbol-color img {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+    
+    /* Dark theme: use light icons */
+    @media (prefers-color-scheme: dark) {
+      .symbol-color[data-is-local="true"] img {
+        content: url('local-light.png');
+      }
+      .symbol-color[data-is-local="false"] img {
+        content: url('library-light.png');
+      }
+    }
+    
+    /* Light theme: default dark icons, active item uses light */
+    @media (prefers-color-scheme: light) {
+      .symbol-color[data-is-local="true"] img {
+        content: url('local-dark.png');
+      }
+      .symbol-color[data-is-local="false"] img {
+        content: url('library-dark.png');
+      }
+      
+      /* Selected item in light theme uses light icons */
+      .symbol-item.selected .symbol-color[data-is-local="true"] img {
+        content: url('local-light.png');
+      }
+      .symbol-item.selected .symbol-color[data-is-local="false"] img {
+        content: url('library-light.png');
+      }
+    }
+    
+    .symbol-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .symbol-name {
+      font-size: 13px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .symbol-library {
+      font-size: 11px;
+      color: var(--library-text);
+      margin-top: 2px;
+    }
+    
+    .preview-panel {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    
+    .preview-section {
+      padding: 12px 16px;
+      display: flex;
+      justify-content: center;
+      border-bottom: 1px solid var(--border-color);
+    }
+    
+    .controls-section {
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: var(--bg-tertiary);
+    }
+    
+    .controls-left {
+      flex-shrink: 0;
+    }
+    
+    .controls-center {
+      flex: 1;
+      text-align: center;
+    }
+    
+    .controls-right {
+      flex-shrink: 0;
+    }
+    
+    .preview-box {
+      width: 100%;
+      height: 140px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      font-weight: 600;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .preview-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: #e0e0e0;
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .preview-hint {
+      font-size: 11px;
+      color: #888;
+    }
+    
+    .preserve-dims-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      flex-shrink: 0;
+      padding: 5px 8px;
+      background: var(--border-color);
+      border: 1px solid var(--key-border);
+      border-radius: 5px;
+    }
+    
+    .preserve-dims-checkbox input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+      accent-color: var(--accent-color);
+    }
+    
+    .shortcuts-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .shortcut-box {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 4px;
+      border-radius: 5px;
+    }
+    
+    .shortcut-label {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+    }
+    
+    .key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 4px;
+      background: var(--key-bg);
+      border: 1px solid var(--key-border);
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text-primary);
+      min-width: 16px;
+      height: 16px;
+    }
+    
+    .key-modifier {
+      background: var(--accent-color);
+      border-color: var(--accent-color);
+      color: #fff;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="search-wrapper">
+    <input type="text" class="search-input" id="searchInput" placeholder="Search symbols..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <div class="search-loader" id="searchLoader"></div>
+  </div>
+  <div class="source-filter" id="sourceFilter"></div>
+  
+  <div class="list-container" id="listContainer">
+    <div class="loading" id="loading">Loading symbols...</div>
+    <ul class="symbols-list" id="symbolsList" style="display: none;"></ul>
+    <div class="empty-state" id="emptyState" style="display: none;">
+      <div>No symbols found</div>
+    </div>
+  </div>
+  
+  <div class="preview-panel" id="previewPanel">
+    <!-- <div class="preview-section">
+      <div class="preview-box" id="previewBox" style="background: #ccc;">?</div>
+    </div> -->
+    <div class="controls-section">
+      <div class="controls-left">
+        <label class="preserve-dims-checkbox">
+          <input type="checkbox" id="preserveDimsCheckbox" checked>
+          <span>Preserve current dimension when replacing</span>
+        </label>
+      </div>
+      <div class="controls-center">
+        <div class="stats" id="stats">Loading...</div>
+      </div>
+      <div class="controls-right">
+        <div class="shortcuts-row">
+          <div class="shortcut-box">
+            <span class="key">tab</span>
+            <span class="shortcut-label">Switch Library</span>
+          </div>
+          <div class="shortcut-box">
+            <span class="key">⇧</span><span class="key">↵</span>
+            <span class="shortcut-label">Replace</span>
+          </div>
+          <div class="shortcut-box">
+            <span class="key">esc</span>
+            <span class="shortcut-label">Close</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Initial data injected by plugin
+    window.INITIAL_SYMBOLS = null;
+    
+    let allSymbols = [];
+    let filteredSymbols = [];
+    let selectedIndex = -1;
+    
+    const PLACEHOLDER_COLORS = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+    ];
+    
+    const searchInput = document.getElementById('searchInput');
+    const symbolsList = document.getElementById('symbolsList');
+    const loadingEl = document.getElementById('loading');
+    const emptyState = document.getElementById('emptyState');
+    const statsEl = document.getElementById('stats');
+    const previewBox = document.getElementById('previewBox');
+    const sourceFilter = document.getElementById('sourceFilter');
+    const searchLoader = document.getElementById('searchLoader');
+    
+    let currentSourceFilter = 'All';
+    let availableSources = ['All', 'Local'];
+    
+    // SVG icons as inline HTML strings (not data URIs) - copied from Resources folder
+    const ICONS = {
+      local_dark: '<svg height="32" viewBox="0 0 32 32" width="32" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><defs><path d="m0 0h32v32h-32z"/><path id="a" d="m0 0h20v20h-20z"/></defs><g fill="none" stroke="#323433" stroke-linecap="round" stroke-width="1.4" transform="translate(5 6)" xlink:href="#a"><path d="m2.80582783 12.4316368c.96906197 3.3024987 3.85657676 5.794272 7.38547387 6.2068274"/><path d="m13.3390449 1.54099481c-.6760657-.16594697-1.3826734-.25380124-2.1105052-.25380124-2.40919573 0-4.59217348.96434195-6.17725241 2.52516819-.30542017.3005541-.58909857.62371398-.84741156.96639703"/><path d="m17.5411088 16.0375153c1.5224419-1.5659639 2.4588912-3.6965585 2.4588912-6.04447685 0-1.21917073-.2521011-2.37925817-.7081607-3.43248194"/><path d="m4.91415881 9.99293569c0-1.34658511-1.10003028-2.43885522-2.45733823-2.43885522-1.3567903 0-2.45682058 1.09227011-2.45682058 2.43885522s1.10003028 2.43885521 2.45682058 2.43885521c1.35730795 0 2.45733823-1.0922701 2.45733823-2.43885521z"/><path d="m18.0801495 17.5611448c0-1.3465851-1.1000303-2.4388552-2.4573382-2.4388552-1.3567903 0-2.4568206 1.0922701-2.4568206 2.4388552s1.1000303 2.4388552 2.4568206 2.4388552c1.3573079 0 2.4573382-1.0922701 2.4573382-2.4388552z"/><path d="m18.0801495 2.43885522c0-1.34658511-1.1000303-2.43885522-2.4573382-2.43885522-1.3567903 0-2.4568206 1.09227011-2.4568206 2.43885522 0 1.34658512 1.1000303 2.43885523 2.4568206 2.43885523 1.3573079 0 2.4573382-1.09227011 2.4573382-2.43885523z"/></g></svg>',
+      local_light: '<svg height="32" viewBox="0 0 32 32" width="32" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><defs><path d="m0 0h32v32h-32z"/><path id="a" d="m0 0h20v20h-20z"/></defs><g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="1.4" transform="translate(5 6)" xlink:href="#a"><path d="m2.80582783 12.4316368c.96906197 3.3024987 3.85657676 5.794272 7.38547387 6.2068274"/><path d="m13.3390449 1.54099481c-.6760657-.16594697-1.3826734-.25380124-2.1105052-.25380124-2.40919573 0-4.59217348.96434195-6.17725241 2.52516819-.30542017.3005541-.58909857.62371398-.84741156.96639703"/><path d="m17.5411088 16.0375153c1.5224419-1.5659639 2.4588912-3.6965585 2.4588912-6.04447685 0-1.21917073-.2521011-2.37925817-.7081607-3.43248194"/><path d="m4.91415881 9.99293569c0-1.34658511-1.10003028-2.43885522-2.45733823-2.43885522-1.3567903 0-2.45682058 1.09227011-2.45682058 2.43885522s1.10003028 2.43885521 2.45682058 2.43885521c1.35730795 0 2.45733823-1.0922701 2.45733823-2.43885521z"/><path d="m18.0801495 17.5611448c0-1.3465851-1.1000303-2.4388552-2.4573382-2.4388552-1.3567903 0-2.4568206 1.0922701-2.4568206 2.4388552s1.1000303 2.4388552 2.4568206 2.4388552c1.3573079 0 2.4573382-1.0922701 2.4573382-2.4388552z"/><path d="m18.0801495 2.43885522c0-1.34658511-1.1000303-2.43885522-2.4573382-2.43885522-1.3567903 0-2.4568206 1.09227011-2.4568206 2.43885522 0 1.34658512 1.1000303 2.43885523 2.4568206 2.43885523 1.3573079 0 2.4573382-1.09227011 2.4573382-2.43885523z"/></g></svg>',
+      library_dark: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><defs><path id="a" d="M0 0h32v32H0V0Z"/><path id="b" d="M0 0h22v14H0V0Z"/></defs><g fill="none" fill-rule="evenodd" stroke="#323433" stroke-linecap="round" stroke-width="1.4"><path d="M9.588 18.333C7.054 18.333 5 16.245 5 13.667h0C5 11.09 7.054 9 9.588 9h5.49c2.535 0 4.59 2.09 4.59 4.667h0c0 2.578-2.055 4.666-4.59 4.666"/><path d="M22.412 13.667c2.534 0 4.588 2.088 4.588 4.666h0C27 20.91 24.946 23 22.412 23h-5.49c-2.535 0-4.59-2.09-4.59-4.667h0c0-2.578 2.055-4.666 4.59-4.666"/></g></svg>',
+      library_light: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><defs><path id="a" d="M0 0h32v32H0V0Z"/><path id="b" d="M0 0h22v14H0V0Z"/></defs><g fill="none" fill-rule="evenodd" stroke="#FFF" stroke-linecap="round" stroke-width="1.4"><path d="M9.588 18.333C7.054 18.333 5 16.245 5 13.667h0C5 11.09 7.054 9 9.588 9h5.49c2.535 0 4.59 2.09 4.59 4.667h0c0 2.578-2.055 4.666-4.59 4.666"/><path d="M22.412 13.667c2.534 0 4.588 2.088 4.588 4.666h0C27 20.91 24.946 23 22.412 23h-5.49c-2.535 0-4.59-2.09-4.59-4.667h0c0-2.578 2.055-4.666 4.59-4.666"/></g></svg>'
+    };
+    
+    // Auto-load initial data if injected by plugin
+    document.addEventListener('DOMContentLoaded', function() {
+      if (window.INITIAL_SYMBOLS) {
+        console.log('Auto-loading initial symbols:', window.INITIAL_SYMBOLS.length);
+        window.loadSymbols(window.INITIAL_SYMBOLS, '');
+      }
+    });
+    
+    // Track which previews are already requested
+    const requestedPreviews = new Set();
+    
+    window.updateSymbolPreview = function(symbolId, previewData) {
+      // Update preview in allSymbols
+      const symbol = allSymbols.find(s => s.id === symbolId);
+      if (symbol) {
+        symbol.preview = previewData;
+      }
+      // Update preview in filteredSymbols
+      const filteredSymbol = filteredSymbols.find(s => s.id === symbolId);
+      if (filteredSymbol) {
+        filteredSymbol.preview = previewData;
+      }
+      // Re-render to show preview
+      renderSymbols();
+      updatePreview();
+    };
+    
+    window.markSymbolAsLocal = function(symbolId) {
+      // Mark symbol as local (was imported from library for preview)
+      const symbol = allSymbols.find(s => s.id === symbolId);
+      if (symbol) {
+        symbol.library = null;
+        symbol.libraryName = 'Local';
+      }
+      const filteredSymbol = filteredSymbols.find(s => s.id === symbolId);
+      if (filteredSymbol) {
+        filteredSymbol.library = null;
+        filteredSymbol.libraryName = 'Local';
+      }
+      // Re-apply filters if currently on Local filter
+      if (currentSourceFilter === 'Local') {
+        applyFilters();
+      }
+    };
+    
+    function requestPreviewForSymbol(symbolId) {
+      if (!requestedPreviews.has(symbolId)) {
+        requestedPreviews.add(symbolId);
+        alert('get-preview:' + symbolId);
+      }
+    }
+    
+    function requestPreviewsForVisibleItems() {
+      // Request previews for symbols visible in viewport + 10 extra below
+      const listContainer = document.getElementById('listContainer');
+      if (!listContainer) return;
+      
+      const containerRect = listContainer.getBoundingClientRect();
+      const symbolItems = symbolsList.querySelectorAll('.symbol-item');
+      const itemHeight = symbolItems.length > 0 ? symbolItems[0].getBoundingClientRect().height : 50;
+      const extraPixels = itemHeight * 10; // 10 extra items below
+      
+      // First, request preview for selected symbol (priority)
+      if (selectedIndex >= 0 && selectedIndex < filteredSymbols.length) {
+        const selectedSymbol = filteredSymbols[selectedIndex];
+        if (selectedSymbol && !selectedSymbol.preview && selectedSymbol.library) {
+          requestPreviewForSymbol(selectedSymbol.id);
+        }
+      }
+      
+      // Then request for visible symbols
+      symbolItems.forEach((item, index) => {
+        const itemRect = item.getBoundingClientRect();
+        // Check if item is visible or within 10 items below viewport
+        const isVisibleOrNear = itemRect.bottom >= containerRect.top && 
+                                itemRect.top <= containerRect.bottom + extraPixels;
+        
+        if (isVisibleOrNear) {
+          const symbol = filteredSymbols[index];
+          if (symbol && !symbol.preview && symbol.library) {
+            requestPreviewForSymbol(symbol.id);
+          }
+        }
+      });
+    }
+    
+    window.setLoading = function(loading) {
+      if (searchLoader) {
+        searchLoader.classList.toggle('visible', loading);
+      }
+      if (searchInput) {
+        searchInput.style.paddingRight = loading ? '36px' : '16px';
+      }
+    };
+    
+    window.loadSymbols = function(symbols, savedQuery) {
+      console.log('loadSymbols called with', symbols ? symbols.length : 0, 'symbols');
+      
+      // Ensure DOM is ready
+      if (!symbolsList || !loadingEl) {
+        console.log('DOM not ready, retrying in 100ms...');
+        setTimeout(function() {
+          window.loadSymbols(symbols, savedQuery);
+        }, 100);
+        return;
+      }
+      
+      allSymbols = symbols || [];
+      loadingEl.style.display = 'none';
+      
+      // Hide loader
+      window.setLoading(false);
+      
+      if (allSymbols.length === 0) {
+        symbolsList.style.display = 'none';
+        emptyState.style.display = 'block';
+        statsEl.textContent = 'No symbols found';
+      } else {
+        // Apply saved search if exists
+        if (savedQuery && savedQuery.trim()) {
+          searchInput.value = savedQuery;
+        }
+        
+        // Apply current source filter and search
+        applyFilters();
+        renderSourceFilter();
+      }
+      
+      // Focus search input after a short delay to ensure rendering is complete
+      setTimeout(() => {
+        searchInput.focus();
+        searchInput.select();
+      }, 100);
+    };
+    
+    function renderSymbols() {
+      symbolsList.innerHTML = filteredSymbols.map((symbol, index) => {
+        const isLocal = symbol.isOriginallyLocal === true;
+        const isSelected = index === selectedIndex;
+        
+        // Determine icon based on theme and selection
+        const isDarkTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        let iconKey;
+        if (isDarkTheme) {
+          // Dark theme: always use light icons
+          iconKey = isLocal ? 'local_light' : 'library_light';
+        } else {
+          // Light theme: dark icons by default, light when selected
+          iconKey = isSelected 
+            ? (isLocal ? 'local_light' : 'library_light')
+            : (isLocal ? 'local_dark' : 'library_dark');
+        }
+        
+        const iconSvg = ICONS[iconKey];
+        
+        return `
+          <li class="symbol-item ${isSelected ? 'selected' : ''}" 
+              data-index="${index}"
+              data-symbol-id="${symbol.id}"
+              onclick="onItemClick(${index})"
+              onmouseenter="onItemHover(${index})">
+            <div class="symbol-color" data-is-local="${isLocal}">
+              ${iconSvg}
+            </div>
+            <div class="symbol-info">
+              <div class="symbol-name">${escapeHtml(symbol.name)}</div>
+              <div class="symbol-library">${escapeHtml(symbol.libraryName || 'Local')}</div>
+            </div>
+          </li>
+        `;
+      }).join('');
+    }
+    
+    function onItemHover(index) {
+      // Request preview for hovered item immediately
+      const symbol = filteredSymbols[index];
+      if (symbol && !symbol.preview && symbol.library) {
+        requestPreviewForSymbol(symbol.id);
+      }
+    }
+    
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    function updateStats() {
+      if (filteredSymbols.length === allSymbols.length) {
+        statsEl.textContent = `${allSymbols.length} symbols`;
+      } else {
+        statsEl.textContent = `${filteredSymbols.length} of ${allSymbols.length}`;
+      }
+    }
+    
+    function renderSourceFilter() {
+      if (!sourceFilter) return;
+      
+      // Collect library sources
+      const librarySources = new Set();
+      let hasLocalSymbols = false;
+      
+      allSymbols.forEach(symbol => {
+        if (symbol.library) {
+          librarySources.add(symbol.libraryName);
+        } else {
+          hasLocalSymbols = true;
+        }
+      });
+      
+      // Build ordered list: All, Local, then libraries
+      availableSources = ['All', 'Local'];
+      librarySources.forEach(source => availableSources.push(source));
+      
+      sourceFilter.innerHTML = availableSources.map(source => {
+        const isActive = source === currentSourceFilter;
+        return `<button class="source-btn ${isActive ? 'active' : ''}" data-source="${source}" onclick="onSourceClick('${source}')">${source}</button>`;
+      }).join('');
+    }
+    
+    function onSourceClick(source) {
+      currentSourceFilter = source;
+      renderSourceFilter();
+      applyFilters();
+    }
+    
+    function applyFilters() {
+      const query = searchInput.value.toLowerCase().trim();
+      
+      // First filter by source
+      let sourceFiltered = allSymbols;
+      if (currentSourceFilter === 'Local') {
+        // Local = only symbols with no library (truly local to this document)
+        sourceFiltered = allSymbols.filter(symbol => symbol.library === null);
+      } else if (currentSourceFilter !== 'All') {
+        sourceFiltered = allSymbols.filter(symbol => symbol.libraryName === currentSourceFilter);
+      }
+      
+      // Then filter by search query (only in name, not library)
+      filteredSymbols = sourceFiltered.filter(symbol => {
+        if (!query) return true;
+        return symbol.name.toLowerCase().includes(query);
+      });
+      
+      selectedIndex = filteredSymbols.length > 0 ? 0 : -1;
+      renderSymbols();
+      updateStats();
+      updatePreview();
+      
+      // Reset scroll to top when filtering
+      const listContainer = document.getElementById('listContainer');
+      if (listContainer) {
+        listContainer.scrollTop = 0;
+      }
+      
+      if (filteredSymbols.length === 0) {
+        symbolsList.style.display = 'none';
+        emptyState.style.display = 'block';
+      } else {
+        symbolsList.style.display = 'block';
+        emptyState.style.display = 'none';
+      }
+      
+      // Request previews for visible library symbols
+      setTimeout(requestPreviewsForVisibleItems, 100);
+    }
+    
+    function cycleSourceFilter() {
+      const currentIndex = availableSources.indexOf(currentSourceFilter);
+      const nextIndex = (currentIndex + 1) % availableSources.length;
+      onSourceClick(availableSources[nextIndex]);
+    }
+    
+    function cycleSourceFilterBackward() {
+      const currentIndex = availableSources.indexOf(currentSourceFilter);
+      const prevIndex = (currentIndex - 1 + availableSources.length) % availableSources.length;
+      onSourceClick(availableSources[prevIndex]);
+    }
+    
+    function updatePreview() {
+      // Preview disabled - previewBox element removed
+      // if (previewBox && selectedIndex >= 0 && selectedIndex < filteredSymbols.length) {
+      //   const symbol = filteredSymbols[selectedIndex];
+      //   const color = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
+      //   const initial = symbol.name.charAt(0).toUpperCase();
+      //   
+      //   if (symbol.preview) {
+      //     previewBox.style.backgroundImage = `url('${symbol.preview}')`;
+      //     previewBox.style.backgroundColor = 'transparent';
+      //     previewBox.textContent = '';
+      //   } else {
+      //     previewBox.style.backgroundImage = 'none';
+      //     previewBox.style.background = color;
+      //     previewBox.textContent = initial;
+      //   }
+      // }
+    }
+    
+    function onItemClick(index) {
+      selectedIndex = index;
+      renderSymbols();
+      updatePreview();
+      insertSymbol(filteredSymbols[selectedIndex].id, false);
+    }
+    
+    function selectSymbol(index) {
+      selectedIndex = index;
+      renderSymbols();
+      updatePreview();
+      
+      // Scroll into view
+      const selectedEl = symbolsList.querySelector('.symbol-item.selected');
+      if (selectedEl) {
+        selectedEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+    
+    function insertSymbol(symbolId, replace) {
+      if (symbolId) {
+        const preserveDims = document.getElementById('preserveDimsCheckbox').checked;
+        const action = replace ? 'replace-symbol:' : 'insert-symbol:';
+        const preserveFlag = replace ? (preserveDims ? ':preserve' : ':original') : '';
+        alert(action + symbolId + preserveFlag);
+      }
+    }
+    
+    // Search
+    let searchTimeout;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        applyFilters();
+      }, 150);
+    });
+    
+    // Load previews on scroll
+    const listContainer = document.getElementById('listContainer');
+    let scrollTimeout;
+    listContainer.addEventListener('scroll', () => {
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        requestPreviewsForVisibleItems();
+      }, 100);
+    });
+    
+    // Periodically check for new visible items (for initial load and hover)
+    let previewInterval = setInterval(() => {
+      if (filteredSymbols.length > 0) {
+        requestPreviewsForVisibleItems();
+      }
+    }, 100);
+    
+    // Stop interval after 30 seconds to save resources
+    setTimeout(() => {
+      clearInterval(previewInterval);
+    }, 30000);
+    
+    // Keyboard navigation - works globally
+    document.addEventListener('keydown', (e) => {
+      // Ignore if typing in search (except for special keys)
+      if (e.target === searchInput && e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter' && e.key !== 'Escape' && e.key !== 'Tab') {
+        return;
+      }
+      
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (selectedIndex < filteredSymbols.length - 1) {
+          selectSymbol(selectedIndex + 1);
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (selectedIndex > 0) {
+          selectSymbol(selectedIndex - 1);
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedIndex >= 0) {
+          const replace = e.shiftKey;
+          insertSymbol(filteredSymbols[selectedIndex].id, replace);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        saveSearch();
+        window.close();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          cycleSourceFilterBackward();
+        } else {
+          cycleSourceFilter();
+        }
+      }
+    });
+    
+    // Window dragging via search input
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    
+    searchInput.addEventListener('mousedown', (e) => {
+      // Always drag on search input
+      isDragging = true;
+      dragStartX = e.screenX;
+      dragStartY = e.screenY;
+      searchInput.classList.add('dragging');
+      e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        const dx = e.screenX - dragStartX;
+        const dy = e.screenY - dragStartY;
+        alert('drag-window:' + dx + ':' + dy);
+        dragStartX = e.screenX;
+        dragStartY = e.screenY;
+      }
+    });
+    
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        searchInput.classList.remove('dragging');
+      }
+    });
+    
+    // Save search helper
+    function saveSearch() {
+      const query = searchInput.value;
+      alert('save-search:' + query);
+    }
+    
+    // Note: search is saved on window close via ESC or close button
+  </script>
+</body>
+</html>
