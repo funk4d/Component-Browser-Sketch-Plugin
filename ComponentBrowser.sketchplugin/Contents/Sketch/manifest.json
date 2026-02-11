@@ -23,5 +23,6 @@
       "browse-components"
     ]
   },
-  "disableCocoaScriptPreprocessor": true
+  "disableCocoaScriptPreprocessor": true,
+  "appcast": "https://raw.githubusercontent.com/funk4d/Component-Browser-Sketch-Plugin/main/appcast.json"
 }
