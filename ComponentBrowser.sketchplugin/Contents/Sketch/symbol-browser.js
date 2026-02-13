@@ -161,8 +161,9 @@ function onRun(context) {
   webViewWindow.setTitleVisibility(NSWindowTitleHidden);
   webViewWindow.setTitle("");
   
-  // Hide all window buttons
-  webViewWindow.standardWindowButton(NSWindowCloseButton).setHidden(true);
+  // DEBUG: Show close button for easier testing
+  // TODO: Hide buttons before release
+  // webViewWindow.standardWindowButton(NSWindowCloseButton).setHidden(true);
   webViewWindow.standardWindowButton(NSWindowMiniaturizeButton).setHidden(true);
   webViewWindow.standardWindowButton(NSWindowZoomButton).setHidden(true);
 
