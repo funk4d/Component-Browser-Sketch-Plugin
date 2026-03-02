@@ -8,7 +8,7 @@ A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Compon
 
 - 🔍 **Smart Search** — Instantly filter symbols by name
 - 🎨 **Source Filtering** — Switch between All, Local, and Library sources
-- *(coming soon)* 🖼️ **Preview Thumbnails** — Visual previews for library symbols 
+- 🖼️ **Preview Thumbnails** — Visual previews for symbols in the list
 - ⌨️ **Keyboard First** — Navigate and insert without touching the mouse
 - 🔄 **Batch Replace** — Replace multiple selected layers at once
 
@@ -55,7 +55,7 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 
 ## Roadmap
 
-- [ ] Add symbol preview thumbnails
+- [x] Add symbol preview thumbnails
 - [ ] Add customization (settings/preferences)
 - [ ] Integrate search for free icon libraries (e.g., Remix Icon)
 - [ ] Add more commands

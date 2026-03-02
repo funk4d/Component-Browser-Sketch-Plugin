@@ -85,6 +85,134 @@ var MochaJSDelegate = function(selectorHandlerDict){
 
 const sketch = require('sketch');
 const UI = require('sketch/ui');
+const PREVIEW_CACHE_KEY = "com.funkyplugins.componentbrowser.previewCache.v2";
+const PREVIEW_RENDER_SIZE = 64;
+const PREVIEW_QUEUE_DELAY_MS = 8;
+const PRIORITY_PREVIEW_DEBOUNCE_MS = 140;
+
+const symbolLookupCache = {
+  docId: null,
+  localById: {},
+  libraryRefById: {}
+};
+const importPreviewFallbackTried = {};
+
+function getDocumentIdentifier(document) {
+  if (!document || !document.sketchObject) return null;
+  const docStr = String(document.sketchObject);
+  const uuidMatch = docStr.match(/\(([a-f0-9-]+)\)/i);
+  return uuidMatch ? uuidMatch[1] : docStr;
+}
+
+function invalidateSymbolLookupCache() {
+  symbolLookupCache.docId = null;
+  symbolLookupCache.localById = {};
+  symbolLookupCache.libraryRefById = {};
+}
+
+function rebuildSymbolLookupCache(document) {
+  const localById = {};
+  const libraryRefById = {};
+
+  const localSymbols = document.getSymbols();
+  localSymbols.forEach(function(symbolMaster) {
+    localById[symbolMaster.id] = symbolMaster;
+  });
+
+  const libraries = sketch.getLibraries();
+  const enabledLibraries = libraries.filter(function(lib) { return lib.enabled; });
+  enabledLibraries.forEach(function(library) {
+    try {
+      const refs = library.getImportableSymbolReferencesForDocument(document);
+      refs.forEach(function(ref) {
+        libraryRefById[ref.id] = ref;
+      });
+    } catch (e) {
+      log("Error building preview ref cache for " + library.name + ": " + e);
+    }
+  });
+
+  symbolLookupCache.docId = getDocumentIdentifier(document);
+  symbolLookupCache.localById = localById;
+  symbolLookupCache.libraryRefById = libraryRefById;
+}
+
+function ensureSymbolLookupCache(document) {
+  const currentDocId = getDocumentIdentifier(document);
+  if (!currentDocId) {
+    invalidateSymbolLookupCache();
+    return;
+  }
+
+  if (symbolLookupCache.docId !== currentDocId) {
+    rebuildSymbolLookupCache(document);
+  }
+}
+
+function getOrCreatePreviewCache() {
+  const threadDictionary = NSThread.mainThread().threadDictionary();
+  let cache = null;
+
+  try {
+    if (threadDictionary.objectForKey) {
+      cache = threadDictionary.objectForKey(PREVIEW_CACHE_KEY);
+    } else {
+      cache = threadDictionary[PREVIEW_CACHE_KEY];
+    }
+  } catch (e) {
+    cache = null;
+  }
+
+  const isMutableDictionary = cache
+    && typeof cache.objectForKey === 'function'
+    && typeof cache.setObject_forKey === 'function';
+
+  if (!isMutableDictionary) {
+    const migrated = NSMutableDictionary.dictionary();
+
+    // Migrate plain JS object cache if it exists.
+    if (cache && typeof cache === 'object' && !Array.isArray(cache)) {
+      Object.keys(cache).forEach(function(key) {
+        const value = cache[key];
+        if (value) {
+          migrated.setObject_forKey(String(value), String(key));
+        }
+      });
+    }
+
+    if (threadDictionary.setObject_forKey) {
+      threadDictionary.setObject_forKey(migrated, PREVIEW_CACHE_KEY);
+    } else {
+      threadDictionary[PREVIEW_CACHE_KEY] = migrated;
+    }
+    cache = migrated;
+  }
+
+  return cache;
+}
+
+function getCachedPreview(symbolId) {
+  if (!symbolId) return null;
+
+  const cache = getOrCreatePreviewCache();
+  try {
+    const value = cache.objectForKey(String(symbolId));
+    return value ? String(value) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setCachedPreview(symbolId, preview) {
+  if (!symbolId || !preview) return;
+
+  const cache = getOrCreatePreviewCache();
+  try {
+    cache.setObject_forKey(String(preview), String(symbolId));
+  } catch (e) {
+    log("Failed to write preview cache for " + symbolId + ": " + e);
+  }
+}
 
 function onRun(context) {
   log("=== Component Browser Started ===");
@@ -101,9 +229,7 @@ function onRun(context) {
   }
   
   // Get current document ID (extract UUID from sketchObject)
-  const docStr = String(document.sketchObject);
-  const uuidMatch = docStr.match(/\(([a-f0-9-]+)\)/i);
-  const currentDocId = uuidMatch ? uuidMatch[1] : docStr;
+  const currentDocId = getDocumentIdentifier(document);
   
   // Get last document ID (if any) - convert to JS string and clear old format if needed
   let lastDocId = threadDictionary["com.funkyplugins.componentbrowser.lastDocId"];
@@ -161,9 +287,8 @@ function onRun(context) {
   webViewWindow.setTitleVisibility(NSWindowTitleHidden);
   webViewWindow.setTitle("");
   
-  // DEBUG: Show close button for easier testing
-  // TODO: Hide buttons before release
-  // webViewWindow.standardWindowButton(NSWindowCloseButton).setHidden(true);
+  // Hide titlebar buttons; close via Esc inside the UI.
+  webViewWindow.standardWindowButton(NSWindowCloseButton).setHidden(true);
   webViewWindow.standardWindowButton(NSWindowMiniaturizeButton).setHidden(true);
   webViewWindow.standardWindowButton(NSWindowZoomButton).setHidden(true);
 
@@ -214,8 +339,10 @@ function onRun(context) {
         const frame = webViewWindow.frame();
         webViewWindow.setFrame_display(NSMakeRect(frame.origin.x + dx, frame.origin.y - dy, frame.size.width, frame.size.height), true);
       } else if (message.startsWith('get-preview:')) {
-        // Preview disabled - ignore these messages
-        // log("Preview request ignored: " + message.substring(12));
+        // Generate list thumbnails in background queue
+        const symbolId = message.substring(12);
+        log("Preview requested for: " + symbolId);
+        queuePreviewRequest(symbolId, document, webView, false);
       } else if (message === 'close') {
         try {
           if (COScript.currentCOScript()) {
@@ -261,20 +388,6 @@ function onRun(context) {
     }, 50);
   }, 300);
 
-  const closeButton = webViewWindow.standardWindowButton(NSWindowCloseButton);
-  closeButton.setCOSJSTargetFunction(function() {
-    // Save search before closing
-    webView.windowScriptObject().evaluateWebScript_('(function() { var el = document.getElementById("searchInput"); return el ? el.value : ""; })();');
-    try {
-      if (COScript.currentCOScript()) {
-        COScript.currentCOScript().setShouldKeepAround(false);
-      }
-    } catch (e) {}
-    threadDictionary.removeObjectForKey(identifier);
-    threadDictionary.removeObjectForKey(delegateIdentifier);
-    webViewWindow.close();
-  });
-  closeButton.setAction("callAction:");
 }
 
 function getAllSymbolsWithPreviews(document) {
@@ -283,17 +396,20 @@ function getAllSymbolsWithPreviews(document) {
   // Get all enabled libraries
   const libraries = sketch.getLibraries();
   const enabledLibraries = libraries.filter(function(lib) { return lib.enabled; });
+  const localSymbols = document.getSymbols();
   
-  // Build Set of all library symbol names for fast lookup
+  // Build lookup maps from libraries (single pass)
   const librarySymbolNames = new Set();
-  const librarySymbolMap = {}; // name -> {library, libraryName}
+  const librarySymbolMap = {}; // id -> {library, libraryName, name}
+  const libraryRefById = {};
   
   enabledLibraries.forEach(function(library) {
     try {
       const refs = library.getImportableSymbolReferencesForDocument(document);
       refs.forEach(function(ref) {
         librarySymbolNames.add(ref.name);
-        librarySymbolMap[ref.name] = { library: library.id, libraryName: library.name };
+        librarySymbolMap[ref.id] = { library: library.id, libraryName: library.name, name: ref.name };
+        libraryRefById[ref.id] = ref;
       });
     } catch (e) {
       log("Error getting refs from " + library.name + ": " + e);
@@ -303,26 +419,69 @@ function getAllSymbolsWithPreviews(document) {
   // Build Set of existing symbol names from document
   const existingSymbolNames = new Set();
   
-  // Process document symbols - check against library names
-  document.getSymbols().forEach(function(symbolMaster, index) {
+  // Process document symbols - check by ID first, then by name
+  localSymbols.forEach(function(symbolMaster, index) {
     const symbolName = symbolMaster.name;
     existingSymbolNames.add(symbolName);
     
-    // Check if symbol name exists in library refs
-    if (librarySymbolNames.has(symbolName)) {
-      // Symbol is from a library
-      const libInfo = librarySymbolMap[symbolName];
+    // First check by ID - if ID matches library, it's a library symbol
+    const libInfoById = librarySymbolMap[symbolMaster.id];
+    
+    if (libInfoById) {
+      // Symbol ID matches library - this is a library symbol
+      log("DOC symbol ID matches library: " + symbolName + " -> " + libInfoById.libraryName);
       symbols.push({
         id: symbolMaster.id,
         name: symbolName,
-        library: libInfo.library,
-        libraryName: libInfo.libraryName,
+        library: libInfoById.library,
+        libraryName: libInfoById.libraryName,
         isOriginallyLocal: false,
         colorIndex: index % 10,
-        preview: null
+        preview: getCachedPreview(symbolMaster.id)
       });
+    } else if (librarySymbolNames.has(symbolName)) {
+      // Name matches but ID doesn't - this is likely an imported copy from library
+      // Find which library this symbol belongs to by name
+      let sourceLibrary = null;
+      for (let i = 0; i < enabledLibraries.length; i++) {
+        try {
+          const refs = enabledLibraries[i].getImportableSymbolReferencesForDocument(document);
+          for (let j = 0; j < refs.length; j++) {
+            if (refs[j].name === symbolName) {
+              sourceLibrary = enabledLibraries[i];
+              break;
+            }
+          }
+          if (sourceLibrary) break;
+        } catch (e) {}
+      }
+      
+      if (sourceLibrary) {
+        log("DOC symbol name matches library (imported copy): " + symbolName + " -> " + sourceLibrary.name);
+        symbols.push({
+          id: symbolMaster.id,
+          name: symbolName,
+          library: sourceLibrary.id,
+          libraryName: sourceLibrary.name,
+          isOriginallyLocal: false,
+          colorIndex: index % 10,
+          preview: getCachedPreview(symbolMaster.id)
+        });
+      } else {
+        log("DOC symbol name matches library (but source unknown): " + symbolName + " -> Local");
+        symbols.push({
+          id: symbolMaster.id,
+          name: symbolName,
+          library: null,
+          libraryName: 'Local',
+          isOriginallyLocal: true,
+          colorIndex: index % 10,
+          preview: getCachedPreview(symbolMaster.id)
+        });
+      }
     } else {
       // Truly local symbol
+      log("DOC truly local symbol: " + symbolName);
       symbols.push({
         id: symbolMaster.id,
         name: symbolName,
@@ -330,7 +489,7 @@ function getAllSymbolsWithPreviews(document) {
         libraryName: 'Local',
         isOriginallyLocal: true,
         colorIndex: index % 10,
-        preview: null
+        preview: getCachedPreview(symbolMaster.id)
       });
     }
   });
@@ -349,7 +508,7 @@ function getAllSymbolsWithPreviews(document) {
             libraryName: library.name,
             isOriginallyLocal: false,
             colorIndex: (symbols.length + idx) % 10,
-            preview: null
+            preview: getCachedPreview(ref.id)
           });
         }
       });
@@ -363,36 +522,115 @@ function getAllSymbolsWithPreviews(document) {
     return a.name.localeCompare(b.name);
   });
 
+  // Keep fast runtime lookup for preview generation
+  symbolLookupCache.docId = getDocumentIdentifier(document);
+  symbolLookupCache.localById = {};
+  localSymbols.forEach(function(symbolMaster) {
+    symbolLookupCache.localById[symbolMaster.id] = symbolMaster;
+  });
+  symbolLookupCache.libraryRefById = libraryRefById;
+
   return symbols;
 }
 
 function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
-  log("Inserting symbol: " + symbolId + (replace ? " (replace mode, preserve=" + preserveDims + ")" : ""));
+  log("=== INSERT SYMBOL START: " + symbolId + " ===");
   
   // Find symbol master - check local symbols first
   let symbolMaster = null;
   
-  // Try to find in local symbols
+  // Try to find in local symbols by ID
   const localSymbols = document.getSymbols();
+  log("Checking " + localSymbols.length + " local symbols by ID...");
   for (let i = 0; i < localSymbols.length; i++) {
     if (localSymbols[i].id === symbolId) {
       symbolMaster = localSymbols[i];
+      log("Found by ID: " + symbolMaster.name);
       break;
     }
   }
   
-  // If not found locally, try to import from libraries
+  // If not found locally, try to find by name (for imported copies with different IDs)
   if (!symbolMaster) {
+    log("Not found by ID, trying name lookup...");
+    try {
+      const libraries = sketch.getLibraries();
+      let symbolName = null;
+      
+      // First, find the symbol name from library refs by ID
+      // Retry up to 3 times with small delay if libraries not loaded yet
+      for (let attempt = 0; attempt < 3 && !symbolName; attempt++) {
+        if (attempt > 0) {
+          log("Retrying library lookup (attempt " + attempt + ")...");
+          // Small delay to let libraries load
+          const start = Date.now();
+          while (Date.now() - start < 100) {} // 100ms busy wait
+        }
+        
+        for (let i = 0; i < libraries.length; i++) {
+          const library = libraries[i];
+          if (library.enabled) {
+            try {
+              const refs = library.getImportableSymbolReferencesForDocument(document);
+              for (let j = 0; j < refs.length; j++) {
+                if (refs[j].id === symbolId) {
+                  symbolName = refs[j].name;
+                  log("Found name in library " + library.name + ": " + symbolName);
+                  break;
+                }
+              }
+            } catch (e) {
+              log("Error getting refs from " + library.name + ": " + e);
+            }
+            if (symbolName) break;
+          }
+        }
+      }
+      
+      // If we found the name, look for local symbol with same name
+      if (symbolName) {
+        log("Looking for local copy of: " + symbolName);
+        const localSymbols = document.getSymbols();
+        log("Current local symbols count: " + localSymbols.length);
+        for (let i = 0; i < localSymbols.length; i++) {
+          if (localSymbols[i].name === symbolName) {
+            symbolMaster = localSymbols[i];
+            log("Found local copy: " + symbolMaster.id);
+            break;
+          }
+        }
+        if (!symbolMaster) {
+          log("No local copy found with name: " + symbolName);
+        }
+      } else {
+        log("Could not find symbol name in any library after retries");
+      }
+    } catch (e) {
+      log("Error finding symbol by name: " + e);
+    }
+  }
+  
+  // If still not found, try to import from libraries
+  if (!symbolMaster) {
+    log("Trying to import from libraries...");
     try {
       const libraries = sketch.getLibraries();
       for (let i = 0; i < libraries.length; i++) {
         const library = libraries[i];
         if (library.enabled) {
+          log("Checking library: " + library.name);
           const refs = library.getImportableSymbolReferencesForDocument(document);
           for (let j = 0; j < refs.length; j++) {
             if (refs[j].id === symbolId) {
               // Import the symbol master into the document
+              log("Importing from " + library.name + "...");
               symbolMaster = refs[j].import();
+              if (symbolMaster) {
+                log("Imported symbol: " + symbolMaster.name + " (ID: " + symbolMaster.id + ")");
+                invalidateSymbolLookupCache();
+              } else {
+                log("Import returned null");
+              }
               break;
             }
           }
@@ -405,9 +643,12 @@ function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
   }
 
   if (!symbolMaster) {
+    log("=== SYMBOL NOT FOUND: " + symbolId + " ===");
     UI.message("❌ Symbol not found");
     return;
   }
+  
+  log("=== SYMBOL FOUND: " + symbolMaster.name + " (" + symbolMaster.id + ") ===");
 
   if (replace && targetLayers && targetLayers.length > 0) {
     // Replace mode - replace all selected layers
@@ -491,129 +732,537 @@ function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
 // Preview queue for throttling
 const previewQueue = [];
 let isProcessingPreview = false;
+let latestPriorityRequestToken = 0;
+const inFlightPreviewBySymbol = {};
+
+function sendPreviewToUI(webView, symbolId, preview) {
+  if (!webView || !symbolId || !preview) return;
+  webView.windowScriptObject().evaluateWebScript_('updateSymbolPreview("' + symbolId + '", "' + preview + '");');
+}
+
+function generateAndCachePreview(symbolId, document) {
+  if (!symbolId) return null;
+
+  const cached = getCachedPreview(symbolId);
+  if (cached) return cached;
+
+  if (inFlightPreviewBySymbol[symbolId]) {
+    return null;
+  }
+
+  inFlightPreviewBySymbol[symbolId] = true;
+  try {
+    const generated = generatePreviewForSymbolSync(symbolId, document);
+    if (generated) {
+      setCachedPreview(symbolId, generated);
+      return generated;
+    }
+    return null;
+  } finally {
+    delete inFlightPreviewBySymbol[symbolId];
+  }
+}
 
 function processPreviewQueue() {
   if (isProcessingPreview || previewQueue.length === 0) return;
   
   isProcessingPreview = true;
   const item = previewQueue.shift();
-  const { symbolId, document, webView } = item;
+  const { symbolId, document, webView, priority } = item;
+  
+  log("Processing preview for: " + symbolId + " (priority: " + priority + ")");
   
   // Generate preview
-  const preview = generatePreviewForSymbolSync(symbolId, document);
-  if (preview && webView) {
-    webView.windowScriptObject().evaluateWebScript_('updateSymbolPreview("' + symbolId + '", "' + preview + '");');
+  const preview = generateAndCachePreview(symbolId, document);
+  if (preview) {
+    sendPreviewToUI(webView, symbolId, preview);
+    log("Preview sent to UI for: " + symbolId);
+  } else {
+    log("Preview generation failed for: " + symbolId);
   }
   
-  // Process next after short delay
+  // Tiny yield between background items keeps UI responsive without adding visible lag.
+  const delay = priority ? 0 : PREVIEW_QUEUE_DELAY_MS;
   setTimeout(function() {
     isProcessingPreview = false;
     processPreviewQueue();
-  }, 50); // 50ms between previews
+  }, delay);
 }
 
 function queuePreviewRequest(symbolId, document, webView, priority) {
-  // Check if already in queue
+  const cached = getCachedPreview(symbolId);
+  if (cached) {
+    sendPreviewToUI(webView, symbolId, cached);
+    return;
+  }
+
+  // For priority (selected symbol), generate async to not block UI
+  if (priority) {
+    const requestToken = ++latestPriorityRequestToken;
+    log("Queueing priority preview for selected: " + symbolId + " (token: " + requestToken + ")");
+    // Debounce fast selection changes: process only the newest symbol.
+    setTimeout(function() {
+      if (requestToken !== latestPriorityRequestToken) {
+        return;
+      }
+
+      const preview = generateAndCachePreview(symbolId, document);
+      if (preview) {
+        sendPreviewToUI(webView, symbolId, preview);
+      }
+    }, PRIORITY_PREVIEW_DEBOUNCE_MS);
+    return;
+  }
+  
+  // Background previews use queue
   const exists = previewQueue.some(item => item.symbolId === symbolId);
   if (!exists) {
-    // Priority items (for immediate actions) go to front of queue
-    const item = { symbolId, document, webView, priority: priority || false };
-    if (priority) {
-      previewQueue.unshift(item);
-    } else {
-      previewQueue.push(item);
-    }
+    previewQueue.push({ symbolId, document, webView, priority: false });
     processPreviewQueue();
   }
 }
 
 function generatePreviewForSymbolSync(symbolId, document) {
-  // Find symbol master
-  let symbolMaster = null;
-  
-  // Try local symbols first
-  const localSymbols = document.getSymbols();
-  for (let i = 0; i < localSymbols.length; i++) {
-    if (localSymbols[i].id === symbolId) {
-      symbolMaster = localSymbols[i];
-      break;
+  ensureSymbolLookupCache(document);
+
+  let localSymbol = symbolLookupCache.localById[symbolId] || null;
+  let libraryRef = symbolLookupCache.libraryRefById[symbolId] || null;
+
+  // Fallback scan if cache misses (can happen when symbols changed after initial load)
+  if (!localSymbol) {
+    const localSymbols = document.getSymbols();
+    for (let i = 0; i < localSymbols.length; i++) {
+      if (localSymbols[i].id === symbolId) {
+        localSymbol = localSymbols[i];
+        symbolLookupCache.localById[symbolId] = localSymbol;
+        break;
+      }
     }
   }
-  
-  // If not found locally, import from library
-  if (!symbolMaster) {
+
+  if (!libraryRef) {
     try {
       const libraries = sketch.getLibraries();
       for (let i = 0; i < libraries.length; i++) {
         const library = libraries[i];
-        if (library.enabled) {
-          const refs = library.getImportableSymbolReferencesForDocument(document);
-          for (let j = 0; j < refs.length; j++) {
-            if (refs[j].id === symbolId) {
-              symbolMaster = refs[j].import();
-              break;
-            }
+        if (!library.enabled) continue;
+        const refs = library.getImportableSymbolReferencesForDocument(document);
+        for (let j = 0; j < refs.length; j++) {
+          if (refs[j].id === symbolId) {
+            libraryRef = refs[j];
+            symbolLookupCache.libraryRefById[symbolId] = libraryRef;
+            break;
           }
-          if (symbolMaster) break;
         }
+        if (libraryRef) break;
       }
     } catch (e) {
-      log("Error importing symbol for preview: " + e);
+      log("Library ref fallback scan failed: " + e);
     }
   }
-  
-  if (symbolMaster) {
-    return generateSymbolPreview(symbolMaster, 24);
+
+  const preview = generateSymbolPreview(localSymbol, libraryRef, PREVIEW_RENDER_SIZE, document, symbolId);
+  if (preview) return preview;
+
+  log("Preview unavailable for symbol: " + symbolId);
+  return null;
+}
+
+function generateSymbolPreview(symbolMaster, symbolReference, size, document, symbolId) {
+  try {
+    if (!symbolMaster && !symbolReference) {
+      return null;
+    }
+
+    // 1) Fast path via private/native preview APIs (no import, no file IO)
+    const nativeSymbolMaster = symbolMaster ? (symbolMaster.sketchObject || symbolMaster) : null;
+    const nativeSymbolReference = symbolReference ? (symbolReference.sketchObject || symbolReference) : null;
+    const privatePreview = generatePreviewUsingPrivateAPI(nativeSymbolMaster, nativeSymbolReference, size);
+    if (privatePreview) {
+      return privatePreview;
+    }
+
+    // 2) Try resolving a master from the reference (without importing)
+    let resolvedNativeMaster = nativeSymbolMaster;
+    if (!resolvedNativeMaster && nativeSymbolReference) {
+      resolvedNativeMaster = resolveNativeMasterFromReference(nativeSymbolReference);
+    }
+
+    // 3) Export fallback (in-memory first, then file fallback)
+    const exportCandidate = symbolMaster || resolvedNativeMaster;
+    if (exportCandidate) {
+      const exportedPreview = exportSymbolToDataUrl(exportCandidate);
+      if (exportedPreview) return exportedPreview;
+    }
+
+    // 4) Last-resort: import once per symbol for preview, then export
+    if (!exportCandidate && symbolReference && symbolId && !importPreviewFallbackTried[symbolId]) {
+      importPreviewFallbackTried[symbolId] = true;
+      try {
+        log("Preview fallback import for symbol: " + symbolId);
+        const imported = symbolReference.import();
+        if (imported) {
+          invalidateSymbolLookupCache();
+          const importedPreview = exportSymbolToDataUrl(imported);
+          if (importedPreview) return importedPreview;
+        }
+      } catch (e) {
+        log("Preview fallback import failed: " + e);
+      }
+    }
+    
+    return null;
+  } catch (e) {
+    log("Preview error: " + e);
+    return null;
+  }
+}
+
+function resolveNativeMasterFromReference(nativeSymbolReference) {
+  if (!nativeSymbolReference) return null;
+
+  try {
+    const selector = NSSelectorFromString("symbolMaster");
+    if (nativeSymbolReference.respondsToSelector && nativeSymbolReference.respondsToSelector(selector)) {
+      if (typeof nativeSymbolReference.symbolMaster === 'function') {
+        const master = nativeSymbolReference.symbolMaster();
+        if (master) return master;
+      }
+    }
+  } catch (e) {
+    log("resolveNativeMasterFromReference failed: " + e);
+  }
+
+  return null;
+}
+
+function exportSymbolToDataUrl(symbolLike) {
+  const exportScale = getExportScaleForSymbol(symbolLike, PREVIEW_RENDER_SIZE);
+
+  // In-memory export (preferred)
+  try {
+    const exportedData = sketch.export(symbolLike, {
+      output: false,
+      formats: "png",
+      scales: exportScale,
+      trimmed: true
+    });
+    const dataUrl = binaryToDataUrl(exportedData);
+    if (dataUrl) return dataUrl;
+  } catch (e) {
+    log("In-memory export failed: " + e);
+  }
+
+  // File-based fallback for compatibility with older API/runtime behavior
+  try {
+    const tempDir = NSTemporaryDirectory();
+    const fileName = "preview_" + Date.now() + "_" + Math.floor(Math.random() * 100000) + ".png";
+    const filePath = tempDir.stringByAppendingPathComponent(fileName);
+    sketch.export(symbolLike, {
+      output: tempDir,
+      filename: fileName,
+      formats: "png",
+      scales: exportScale,
+      trimmed: true,
+      overwriting: true
+    });
+
+    const fileManager = NSFileManager.defaultManager();
+    if (fileManager.fileExistsAtPath(filePath)) {
+      const imageData = NSData.dataWithContentsOfFile(filePath);
+      if (imageData && imageData.length() > 0) {
+        const base64String = imageData.base64EncodedStringWithOptions(0);
+        try {
+          fileManager.removeItemAtPath_error(filePath, null);
+        } catch (cleanupErr) {}
+        return "data:image/png;base64," + base64String;
+      }
+    }
+  } catch (e) {
+    log("File export fallback failed: " + e);
+  }
+
+  return null;
+}
+
+function getExportScaleForSymbol(symbolLike, targetSize) {
+  const fallbackScale = "0.25";
+  if (!symbolLike || !targetSize || targetSize <= 0) return fallbackScale;
+
+  const dimensions = getSymbolDimensions(symbolLike);
+  if (!dimensions) return fallbackScale;
+
+  const maxDim = Math.max(dimensions.width, dimensions.height);
+  if (!isFinite(maxDim) || maxDim <= 0) return fallbackScale;
+
+  const rawScale = targetSize / maxDim;
+  const clampedScale = Math.max(0.05, Math.min(rawScale, 4));
+  if (!isFinite(clampedScale) || clampedScale <= 0) return fallbackScale;
+
+  return String(Math.round(clampedScale * 1000) / 1000);
+}
+
+function getSymbolDimensions(symbolLike) {
+  let width = null;
+  let height = null;
+
+  try {
+    const native = symbolLike.sketchObject || symbolLike;
+    if (native && typeof native.frame === 'function') {
+      const frame = native.frame();
+      if (frame) {
+        width = typeof frame.width === 'function' ? Number(frame.width()) : Number(frame.width);
+        height = typeof frame.height === 'function' ? Number(frame.height()) : Number(frame.height);
+      }
+    }
+  } catch (e) {}
+
+  if (!(isFinite(width) && width > 0 && isFinite(height) && height > 0)) {
+    try {
+      const frame = symbolLike && symbolLike.frame;
+      if (frame) {
+        width = typeof frame.width === 'function' ? Number(frame.width()) : Number(frame.width);
+        height = typeof frame.height === 'function' ? Number(frame.height()) : Number(frame.height);
+      }
+    } catch (e) {}
+  }
+
+  if (!isFinite(width) || width <= 0 || !isFinite(height) || height <= 0) {
+    return null;
+  }
+
+  return { width, height };
+}
+
+function binaryToResizedDataUrl(binaryData, size) {
+  const nsData = extractNSDataFromBinary(binaryData);
+  if (nsData) {
+    const nsImage = NSImage.alloc().initWithData(nsData);
+    const resizedDataUrl = convertNSImageToBase64(nsImage, size);
+    if (resizedDataUrl) {
+      return resizedDataUrl;
+    }
+  }
+  return binaryToDataUrl(binaryData);
+}
+
+function extractNSDataFromBinary(binaryData) {
+  try {
+    let data = binaryData;
+    if (Array.isArray(data)) {
+      data = data[0];
+    }
+    if (!data) return null;
+
+    if (data.base64EncodedStringWithOptions && data.length) {
+      return data;
+    }
+
+    if (typeof data.toString === 'function') {
+      const maybeBase64 = data.toString('base64');
+      if (typeof maybeBase64 === 'string' && /^[A-Za-z0-9+/=]+$/.test(maybeBase64)) {
+        return NSData.alloc().initWithBase64EncodedString_options(maybeBase64, 0);
+      }
+    }
+  } catch (e) {
+    log("extractNSDataFromBinary failed: " + e);
   }
   return null;
 }
 
-function generateSymbolPreview(symbolMaster, size) {
+function generatePreviewUsingPrivateAPI(nativeSymbolMaster, nativeSymbolReference, size) {
+  const colorSpace = getPreviewColorSpace();
+  const previewSize = NSMakeSize(size, size);
+
+  // Try existing reference first (works for library symbols without importing)
+  const referencePreview = previewFromNativeObject(nativeSymbolReference, previewSize, colorSpace);
+  if (referencePreview) return referencePreview;
+
+  // Try symbol master directly
+  const masterPreview = previewFromNativeObject(nativeSymbolMaster, previewSize, colorSpace);
+  if (masterPreview) return masterPreview;
+
+  // Try creating a shareable reference from local symbol master and preview through that
+  if (nativeSymbolMaster) {
+    const generatedRef = makeShareableReferenceFromMaster(nativeSymbolMaster);
+    const generatedRefPreview = previewFromNativeObject(generatedRef, previewSize, colorSpace);
+    if (generatedRefPreview) return generatedRefPreview;
+  }
+
+  return null;
+}
+
+function getPreviewColorSpace() {
   try {
-    const nativeMaster = symbolMaster.sketchObject;
-    if (!nativeMaster) return null;
-    
-    // Get symbol frame
-    const frame = nativeMaster.frame();
-    const width = frame.width();
-    const height = frame.height();
-    
-    if (width === 0 || height === 0) return null;
-    
-    // Calculate scale to fit desired size
-    const maxDim = Math.max(width, height);
-    const scale = size / maxDim;
-    
-    // Create temp file path
-    const tempDir = NSTemporaryDirectory();
-    const fileName = "preview_" + nativeMaster.objectID() + ".png";
-    const exportPath = tempDir.stringByAppendingPathComponent(fileName);
-    
-    // Export using sketch.export with filename (like dockpreview plugin)
-    const wasExported = sketch.export(symbolMaster, {
-      output: tempDir,
-      filename: fileName,
-      formats: 'png',
-      scales: String(scale),
-      overwriting: true
-    });
-    
-    if (!wasExported) {
+    if (NSColorSpace && NSColorSpace.sRGBColorSpace) {
+      return NSColorSpace.sRGBColorSpace();
+    }
+  } catch (e) {}
+
+  try {
+    if (NSColorSpace && NSColorSpace.deviceRGBColorSpace) {
+      return NSColorSpace.deviceRGBColorSpace();
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+function makeShareableReferenceFromMaster(nativeSymbolMaster) {
+  try {
+    if (typeof MSShareableObjectReference === 'undefined' || !nativeSymbolMaster) {
       return null;
     }
+
+    const refSelector = NSSelectorFromString("referenceForShareableObject:");
+    if (MSShareableObjectReference.respondsToSelector(refSelector) && MSShareableObjectReference.referenceForShareableObject) {
+      return MSShareableObjectReference.referenceForShareableObject(nativeSymbolMaster);
+    }
+  } catch (e) {
+    log("Failed to create shareable reference: " + e);
+  }
+
+  return null;
+}
+
+function previewFromNativeObject(nativeObject, previewSize, colorSpace) {
+  if (!nativeObject) return null;
+
+  const methods = [
+    {
+      selector: "previewImageOfSize:colorSpace:clippingAsBorder:borderWidth:",
+      method: "previewImageOfSize_colorSpace_clippingAsBorder_borderWidth",
+      args: [previewSize, colorSpace, false, 0],
+      needsTargetResolution: true
+    },
+    {
+      selector: "previewImageForSize:colorSpace:",
+      method: "previewImageForSize_colorSpace",
+      args: [previewSize, colorSpace],
+      needsTargetResolution: true
+    },
+    {
+      selector: "previewImage",
+      method: "previewImage",
+      args: []
+    },
+    {
+      selector: "cachedPreviewImage",
+      method: "cachedPreviewImage",
+      args: []
+    }
+  ];
+
+  for (let i = 0; i < methods.length; i++) {
+    try {
+      const entry = methods[i];
+      const selector = NSSelectorFromString(entry.selector);
+      if (!nativeObject.respondsToSelector || !nativeObject.respondsToSelector(selector)) {
+        continue;
+      }
+      if (typeof nativeObject[entry.method] !== 'function') {
+        continue;
+      }
+
+      const image = nativeObject[entry.method].apply(nativeObject, entry.args);
+      const pixelSize = (previewSize && previewSize.width) ? previewSize.width : 128;
+
+      const maxImageDim = getNSImageMaxDimension(image);
+      const isLastMethod = i === methods.length - 1;
+      if (entry.needsTargetResolution && maxImageDim > 0 && maxImageDim < (pixelSize * 0.9) && !isLastMethod) {
+        continue;
+      }
+
+      const dataUrl = convertNSImageToBase64(image, pixelSize);
+      if (dataUrl) return dataUrl;
+    } catch (e) {
+      log("Private preview method failed (" + methods[i].selector + "): " + e);
+    }
+  }
+
+  return null;
+}
+
+function getNSImageMaxDimension(nsImage) {
+  try {
+    if (!nsImage || typeof nsImage.size !== 'function') return 0;
+    const size = nsImage.size();
+    if (!size) return 0;
+    const width = Number(size.width) || 0;
+    const height = Number(size.height) || 0;
+    return Math.max(width, height);
+  } catch (e) {
+    return 0;
+  }
+}
+
+function binaryToDataUrl(binaryData) {
+  try {
+    let data = binaryData;
+    if (Array.isArray(data)) {
+      data = data[0];
+    }
+    if (!data) return null;
+
+    if (data.base64EncodedStringWithOptions) {
+      return "data:image/png;base64," + data.base64EncodedStringWithOptions(0);
+    }
+
+    if (typeof data.toString === 'function') {
+      const maybeBase64 = data.toString('base64');
+      if (typeof maybeBase64 === 'string' && /^[A-Za-z0-9+/=]+$/.test(maybeBase64)) {
+        return "data:image/png;base64," + maybeBase64;
+      }
+    }
+  } catch (e) {
+    log("Binary conversion failed: " + e);
+  }
+
+  return null;
+}
+
+function convertNSImageToBase64(nsImage, size) {
+  try {
+    if (!nsImage) return null;
     
-    // Read the exported file
-    const imageData = NSData.dataWithContentsOfFile(exportPath);
+    // Resize image
+    const originalSize = nsImage.size();
+    const maxDim = Math.max(originalSize.width, originalSize.height);
+    const scale = size / maxDim;
     
-    // Clean up
-    NSFileManager.defaultManager().removeItemAtPath_error(exportPath, null);
+    const newWidth = originalSize.width * scale;
+    const newHeight = originalSize.height * scale;
     
-    if (imageData && imageData.length() > 0) {
-      const base64String = imageData.base64EncodedStringWithOptions(0);
+    const newSize = NSMakeSize(newWidth, newHeight);
+    const resizedImage = NSImage.alloc().initWithSize(newSize);
+    
+    resizedImage.lockFocus();
+    nsImage.drawInRect_fromRect_operation_fraction_(
+      NSMakeRect(0, 0, newWidth, newHeight),
+      NSMakeRect(0, 0, originalSize.width, originalSize.height),
+      NSCompositeSourceOver,
+      1.0
+    );
+    resizedImage.unlockFocus();
+    
+    // Convert to PNG
+    const imageData = resizedImage.TIFFRepresentation();
+    if (!imageData) return null;
+    
+    const imageRep = NSBitmapImageRep.imageRepWithData(imageData);
+    if (!imageRep) return null;
+    
+    const pngData = imageRep.representationUsingType_properties_(
+      NSBitmapImageFileTypePNG,
+      {}
+    );
+    
+    if (pngData && pngData.length() > 0) {
+      const base64String = pngData.base64EncodedStringWithOptions(0);
       return "data:image/png;base64," + base64String;
     }
   } catch (e) {
-    log("Preview error: " + e);
+    log("Image conversion error: " + e);
   }
   return null;
 }

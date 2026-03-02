@@ -165,7 +165,7 @@
     
     .source-btn.active {
       background: var(--bg-secondary);
-      border-color: var(--border-colorf);
+      border-color: var(--border-color);
       color: var(--text-primary);
     }
     
@@ -185,7 +185,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      transition: background 0.15s;
+      transition: none;
       color: var(--text-primary);
     }
     
@@ -203,7 +203,7 @@
       color: rgba(255,255,255,0.7);
     }
     
-    .symbol-color {
+    .symbol-thumb {
       width: 32px;
       height: 32px;
       border-radius: 6px;
@@ -211,46 +211,42 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      background-color: transparent;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: contain;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
     }
     
-    .symbol-color img {
-      width: 20px;
-      height: 20px;
-      object-fit: contain;
-    }
-    
-    /* Dark theme: use light icons */
-    @media (prefers-color-scheme: dark) {
-      .symbol-color[data-is-local="true"] img {
-        content: url('local-light.png');
-      }
-      .symbol-color[data-is-local="false"] img {
-        content: url('library-light.png');
-      }
-    }
-    
-    /* Light theme: default dark icons, active item uses light */
-    @media (prefers-color-scheme: light) {
-      .symbol-color[data-is-local="true"] img {
-        content: url('local-dark.png');
-      }
-      .symbol-color[data-is-local="false"] img {
-        content: url('library-dark.png');
-      }
-      
-      /* Selected item in light theme uses light icons */
-      .symbol-item.selected .symbol-color[data-is-local="true"] img {
-        content: url('local-light.png');
-      }
-      .symbol-item.selected .symbol-color[data-is-local="false"] img {
-        content: url('library-light.png');
-      }
+    .symbol-thumb-initial {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
     }
     
     .symbol-info {
       flex: 1;
       min-width: 0;
+    }
+
+    .symbol-kind-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      opacity: 0.5;
+    }
+
+    .symbol-kind-badge svg {
+      width: 32px;
+      height: 32px;
+      display: block;
+    }
+
+    .symbol-item.selected .symbol-kind-badge {
+      opacity: 0.72;
     }
     
     .symbol-name {
@@ -276,22 +272,8 @@
       margin-top: 2px;
     }
     
-    .preview-panel {
-      background: var(--bg-secondary);
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-    }
-    
-    .preview-section {
-      padding: 12px 16px;
-      display: flex;
-      justify-content: center;
-      border-bottom: 1px solid var(--border-color);
-    }
-    
     .controls-section {
+      border-top: 1px solid var(--border-color);
       padding: 10px 12px;
       display: flex;
       align-items: center;
@@ -311,35 +293,6 @@
     
     .controls-right {
       flex-shrink: 0;
-    }
-    
-    .preview-box {
-      width: 100%;
-      height: 140px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 32px;
-      font-weight: 600;
-      color: #fff;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    .preview-name {
-      font-size: 13px;
-      font-weight: 500;
-      color: #e0e0e0;
-      text-align: center;
-      max-width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    
-    .preview-hint {
-      font-size: 11px;
-      color: #888;
     }
     
     .preserve-dims-checkbox {
@@ -432,34 +385,29 @@
     </div>
   </div>
   
-  <div class="preview-panel" id="previewPanel">
-    <div class="preview-section">
-      <div class="preview-box" id="previewBox" style="background: #ccc;">?</div>
+  <div class="controls-section">
+    <div class="controls-left">
+      <label class="preserve-dims-checkbox">
+        <input type="checkbox" id="preserveDimsCheckbox" checked>
+        <span>Preserve current dimension when replacing</span>
+      </label>
     </div>
-    <div class="controls-section">
-      <div class="controls-left">
-        <label class="preserve-dims-checkbox">
-          <input type="checkbox" id="preserveDimsCheckbox" checked>
-          <span>Preserve current dimension when replacing</span>
-        </label>
-      </div>
-      <div class="controls-center">
-        <div class="stats" id="stats">Loading...</div>
-      </div>
-      <div class="controls-right">
-        <div class="shortcuts-row">
-          <div class="shortcut-box">
-            <span class="key">tab</span>
-            <span class="shortcut-label">Switch Library</span>
-          </div>
-          <div class="shortcut-box">
-            <span class="key">⇧</span><span class="key">↵</span>
-            <span class="shortcut-label">Replace</span>
-          </div>
-          <div class="shortcut-box">
-            <span class="key">esc</span>
-            <span class="shortcut-label">Close</span>
-          </div>
+    <div class="controls-center">
+      <div class="stats" id="stats">Loading...</div>
+    </div>
+    <div class="controls-right">
+      <div class="shortcuts-row">
+        <div class="shortcut-box">
+          <span class="key">tab</span>
+          <span class="shortcut-label">Switch Library</span>
+        </div>
+        <div class="shortcut-box">
+          <span class="key">⇧</span><span class="key">↵</span>
+          <span class="shortcut-label">Replace</span>
+        </div>
+        <div class="shortcut-box">
+          <span class="key">esc</span>
+          <span class="shortcut-label">Close</span>
         </div>
       </div>
     </div>
@@ -483,7 +431,7 @@
     const loadingEl = document.getElementById('loading');
     const emptyState = document.getElementById('emptyState');
     const statsEl = document.getElementById('stats');
-    const previewBox = document.getElementById('previewBox');
+    const listContainer = document.getElementById('listContainer');
     const sourceFilter = document.getElementById('sourceFilter');
     const searchLoader = document.getElementById('searchLoader');
     
@@ -508,6 +456,11 @@
     
     // Track which previews are already requested
     const requestedPreviews = new Set();
+    const loadedPreviews = new Set();
+    const queuedPreviews = new Set();
+    const previewDispatchQueue = [];
+    const PREVIEW_DISPATCH_DELAY_MS = 8;
+    let previewDispatchTimer = null;
     
     window.updateSymbolPreview = function(symbolId, previewData) {
       // Update preview in allSymbols
@@ -520,9 +473,10 @@
       if (filteredSymbol) {
         filteredSymbol.preview = previewData;
       }
-      // Re-render to show preview
-      renderSymbols();
-      updatePreview();
+      loadedPreviews.add(symbolId);
+      requestedPreviews.add(symbolId);
+      queuedPreviews.delete(symbolId);
+      updatePreviewThumbnailInList(symbolId, previewData);
     };
     
     window.markSymbolAsLocal = function(symbolId) {
@@ -543,45 +497,52 @@
       }
     };
     
-    function requestPreviewForSymbol(symbolId) {
-      if (!requestedPreviews.has(symbolId)) {
-        requestedPreviews.add(symbolId);
-        alert('get-preview:' + symbolId);
+    function dispatchNextPreviewRequest() {
+      if (previewDispatchTimer || previewDispatchQueue.length === 0) {
+        return;
       }
+
+      previewDispatchTimer = setTimeout(() => {
+        previewDispatchTimer = null;
+        const symbolId = previewDispatchQueue.shift();
+        if (symbolId) {
+          queuedPreviews.delete(symbolId);
+          requestedPreviews.add(symbolId);
+          alert('get-preview:' + symbolId);
+        }
+        dispatchNextPreviewRequest();
+      }, PREVIEW_DISPATCH_DELAY_MS);
+    }
+
+    function enqueuePreviewRequest(symbolId) {
+      if (!symbolId) return;
+      if (loadedPreviews.has(symbolId) || requestedPreviews.has(symbolId) || queuedPreviews.has(symbolId)) {
+        return;
+      }
+      queuedPreviews.add(symbolId);
+      previewDispatchQueue.push(symbolId);
+      dispatchNextPreviewRequest();
     }
     
     function requestPreviewsForVisibleItems() {
-      // Request previews for symbols visible in viewport + 10 extra below
-      const listContainer = document.getElementById('listContainer');
-      if (!listContainer) return;
-      
-      const containerRect = listContainer.getBoundingClientRect();
-      const symbolItems = symbolsList.querySelectorAll('.symbol-item');
-      const itemHeight = symbolItems.length > 0 ? symbolItems[0].getBoundingClientRect().height : 50;
-      const extraPixels = itemHeight * 10; // 10 extra items below
-      
-      // First, request preview for selected symbol (priority)
-      if (selectedIndex >= 0 && selectedIndex < filteredSymbols.length) {
-        const selectedSymbol = filteredSymbols[selectedIndex];
-        if (selectedSymbol && !selectedSymbol.preview && selectedSymbol.library) {
-          requestPreviewForSymbol(selectedSymbol.id);
+      if (!listContainer || filteredSymbols.length === 0) return;
+
+      const firstItem = symbolsList.querySelector('.symbol-item');
+      const itemHeight = (firstItem && firstItem.offsetHeight) ? firstItem.offsetHeight : 52;
+      const overscan = 6;
+      const startIndex = Math.max(0, Math.floor(listContainer.scrollTop / itemHeight) - overscan);
+      const endIndex = Math.min(
+        filteredSymbols.length - 1,
+        Math.ceil((listContainer.scrollTop + listContainer.clientHeight) / itemHeight) + overscan
+      );
+
+      for (let i = startIndex; i <= endIndex; i++) {
+        const symbol = filteredSymbols[i];
+        if (!symbol || symbol.preview) {
+          continue;
         }
+        enqueuePreviewRequest(symbol.id);
       }
-      
-      // Then request for visible symbols
-      symbolItems.forEach((item, index) => {
-        const itemRect = item.getBoundingClientRect();
-        // Check if item is visible or within 10 items below viewport
-        const isVisibleOrNear = itemRect.bottom >= containerRect.top && 
-                                itemRect.top <= containerRect.bottom + extraPixels;
-        
-        if (isVisibleOrNear) {
-          const symbol = filteredSymbols[index];
-          if (symbol && !symbol.preview && symbol.library) {
-            requestPreviewForSymbol(symbol.id);
-          }
-        }
-      });
     }
     
     window.setLoading = function(loading) {
@@ -606,6 +567,20 @@
       }
       
       allSymbols = symbols || [];
+      requestedPreviews.clear();
+      loadedPreviews.clear();
+      queuedPreviews.clear();
+      previewDispatchQueue.length = 0;
+      if (previewDispatchTimer) {
+        clearTimeout(previewDispatchTimer);
+        previewDispatchTimer = null;
+      }
+      allSymbols.forEach((symbol) => {
+        if (symbol && symbol.preview) {
+          loadedPreviews.add(symbol.id);
+          requestedPreviews.add(symbol.id);
+        }
+      });
       loadingEl.style.display = 'none';
       
       // Hide loader
@@ -634,25 +609,23 @@
     function renderSymbols() {
       const query = searchInput.value.toLowerCase().trim();
       const queryParts = query ? query.replace(/[\/\-_]/g, ' ').split(/\s+/).filter(p => p.length > 0) : [];
+      const isDarkTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       
       symbolsList.innerHTML = filteredSymbols.map((symbol, index) => {
         const isLocal = symbol.isOriginallyLocal === true;
         const isSelected = index === selectedIndex;
         
-        // Determine icon based on theme and selection
-        const isDarkTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        let iconKey;
-        if (isDarkTheme) {
-          // Dark theme: always use light icons
-          iconKey = isLocal ? 'local_light' : 'library_light';
-        } else {
-          // Light theme: dark icons by default, light when selected
-          iconKey = isSelected 
-            ? (isLocal ? 'local_light' : 'library_light')
-            : (isLocal ? 'local_dark' : 'library_dark');
-        }
+        // Keep icon variant independent from selection to avoid full list rerenders on ↑/↓.
+        const iconKey = isDarkTheme
+          ? (isLocal ? 'local_light' : 'library_light')
+          : (isLocal ? 'local_dark' : 'library_dark');
         
         const iconSvg = ICONS[iconKey];
+        const previewColor = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
+        const previewInitial = escapeHtml(symbol.name.charAt(0).toUpperCase());
+        const thumbHtml = symbol.preview
+          ? `<div class="symbol-thumb has-preview" style="background-image: url('${symbol.preview}');"></div>`
+          : `<div class="symbol-thumb" style="background-color: ${previewColor};"><span class="symbol-thumb-initial">${previewInitial}</span></div>`;
         
         // Highlight matching parts in name
         const displayName = escapeHtml(symbol.name).replace(/\//g, ' → ');
@@ -662,18 +635,51 @@
           <li class="symbol-item ${isSelected ? 'selected' : ''}" 
               data-index="${index}"
               data-symbol-id="${symbol.id}"
-              onclick="onItemClick(${index})"
-              onmouseenter="onItemHover(${index})">
-            <div class="symbol-color" data-is-local="${isLocal}">
-              ${iconSvg}
-            </div>
+              onclick="onItemClick(${index})">
+            ${thumbHtml}
             <div class="symbol-info">
               <div class="symbol-name">${highlightedName}</div>
               <div class="symbol-library">${escapeHtml(symbol.libraryName || 'Local')}</div>
             </div>
+            <span class="symbol-kind-badge">${iconSvg}</span>
           </li>
         `;
       }).join('');
+    }
+
+    function updateSelectedItemDOM(previousIndex, nextIndex) {
+      if (previousIndex === nextIndex) return;
+
+      if (previousIndex >= 0) {
+        const previousEl = symbolsList.querySelector(`.symbol-item[data-index="${previousIndex}"]`);
+        if (previousEl) {
+          previousEl.classList.remove('selected');
+        }
+      }
+
+      if (nextIndex >= 0) {
+        const nextEl = symbolsList.querySelector(`.symbol-item[data-index="${nextIndex}"]`);
+        if (nextEl) {
+          nextEl.classList.add('selected');
+        }
+      }
+    }
+
+    function setSelectedIndex(index, scrollIntoViewSelected) {
+      if (index < 0 || index >= filteredSymbols.length) return;
+
+      const previousIndex = selectedIndex;
+      selectedIndex = index;
+      updateSelectedItemDOM(previousIndex, selectedIndex);
+
+      if (scrollIntoViewSelected) {
+        const selectedEl = symbolsList.querySelector(`.symbol-item[data-index="${selectedIndex}"]`);
+        if (selectedEl) {
+          selectedEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+        }
+      }
+
+      requestPreviewsForVisibleItems();
     }
     
     function highlightMatches(text, queryParts) {
@@ -695,14 +701,6 @@
           ? `<span class="match">${part}</span>`
           : `<span class="faded">${part}</span>`;
       }).join('');
-    }
-    
-    function onItemHover(index) {
-      // Request preview for hovered item immediately
-      const symbol = filteredSymbols[index];
-      if (symbol && !symbol.preview && symbol.library) {
-        requestPreviewForSymbol(symbol.id);
-      }
     }
     
     function escapeHtml(text) {
@@ -790,10 +788,8 @@
       
       renderSymbols();
       updateStats();
-      updatePreview();
       
       // Reset scroll to top when filtering
-      const listContainer = document.getElementById('listContainer');
       if (listContainer) {
         listContainer.scrollTop = 0;
       }
@@ -806,8 +802,10 @@
         emptyState.style.display = 'none';
       }
       
-      // Request previews for visible library symbols
-      setTimeout(requestPreviewsForVisibleItems, 100);
+      // Request previews for items currently visible in the list
+      requestAnimationFrame(() => {
+        requestPreviewsForVisibleItems();
+      });
     }
     
     function cycleSourceFilter() {
@@ -822,42 +820,27 @@
       onSourceClick(availableSources[prevIndex]);
     }
     
-    function updatePreview() {
-      // Preview disabled - previewBox element removed
-      // if (previewBox && selectedIndex >= 0 && selectedIndex < filteredSymbols.length) {
-      //   const symbol = filteredSymbols[selectedIndex];
-      //   const color = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
-      //   const initial = symbol.name.charAt(0).toUpperCase();
-      //   
-      //   if (symbol.preview) {
-      //     previewBox.style.backgroundImage = `url('${symbol.preview}')`;
-      //     previewBox.style.backgroundColor = 'transparent';
-      //     previewBox.textContent = '';
-      //   } else {
-      //     previewBox.style.backgroundImage = 'none';
-      //     previewBox.style.background = color;
-      //     previewBox.textContent = initial;
-      //   }
-      // }
+    function updatePreviewThumbnailInList(symbolId, previewData) {
+      const listItem = symbolsList.querySelector(`.symbol-item[data-symbol-id="${symbolId}"]`);
+      if (!listItem) return;
+      const thumb = listItem.querySelector('.symbol-thumb');
+      if (!thumb) return;
+
+      thumb.style.backgroundImage = `url('${previewData}')`;
+      thumb.style.backgroundColor = 'transparent';
+      const initial = thumb.querySelector('.symbol-thumb-initial');
+      if (initial) {
+        initial.remove();
+      }
     }
     
     function onItemClick(index) {
-      selectedIndex = index;
-      renderSymbols();
-      updatePreview();
+      setSelectedIndex(index, false);
       insertSymbol(filteredSymbols[selectedIndex].id, false);
     }
     
     function selectSymbol(index) {
-      selectedIndex = index;
-      renderSymbols();
-      updatePreview();
-      
-      // Scroll into view
-      const selectedEl = symbolsList.querySelector('.symbol-item.selected');
-      if (selectedEl) {
-        selectedEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
+      setSelectedIndex(index, true);
     }
     
     function insertSymbol(symbolId, replace) {
@@ -879,21 +862,21 @@
     });
     
     // Load previews on scroll
-    const listContainer = document.getElementById('listContainer');
-    let scrollTimeout;
+    let scrollPreviewRaf = null;
     listContainer.addEventListener('scroll', () => {
-      clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(() => {
+      if (scrollPreviewRaf !== null) return;
+      scrollPreviewRaf = requestAnimationFrame(() => {
+        scrollPreviewRaf = null;
         requestPreviewsForVisibleItems();
-      }, 100);
+      });
     });
     
-    // Periodically check for new visible items (for initial load and hover)
+    // Periodically check for new visible items.
     let previewInterval = setInterval(() => {
       if (filteredSymbols.length > 0) {
         requestPreviewsForVisibleItems();
       }
-    }, 100);
+    }, 700);
     
     // Stop interval after 30 seconds to save resources
     setTimeout(() => {

@@ -10,12 +10,12 @@
   ],
   "name": "Component Browser",
   "identifier": "com.funkyplugins.componentbrowser",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Browse and insert Symbols/Components",
   "author": "Dmytro Shevchuk",
   "icon": "icon.png",
   "compatibleVersion": 3,
-  "bundleVersion": 1,
+  "bundleVersion": 2,
   "menu": {
     "title": "Component Browser",
     "isRoot": true,
@@ -23,6 +23,5 @@
       "browse-components"
     ]
   },
-  "disableCocoaScriptPreprocessor": true,
-  "appcast": "https://raw.githubusercontent.com/funk4d/Component-Browser-Sketch-Plugin/main/appcast.json"
+  "disableCocoaScriptPreprocessor": true
 }
