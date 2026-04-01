@@ -17,8 +17,9 @@
       
       /* Dark theme (default) */
       --bg-primary: rgba(30, 30, 30, 0.56);
-      --bg-secondary: rgba(45, 45, 45, 0.54);
+      --bg-secondary: rgba(60, 60, 60, 0.54);
       --bg-tertiary: rgba(37, 37, 37, 0.62);
+      --bg-top-chrome: rgba(37, 37, 37, 0.68);
       --bg-filter-bar: rgba(37, 37, 37, 0.72);
       --bg-input: rgba(30, 30, 30, 0.18);
       --bg-input-focus: rgba(50, 50, 50, 0.3);
@@ -39,6 +40,7 @@
         --bg-primary: rgba(245, 245, 245, 0.62);
         --bg-secondary: rgba(255, 255, 255, 0.72);
         --bg-tertiary: rgba(240, 240, 240, 0.72);
+        --bg-top-chrome: rgba(243, 243, 243, 0.82);
         --bg-filter-bar: rgba(243, 243, 243, 0.86);
         --bg-input: rgba(255, 255, 255, 0.18);
         --bg-input-focus: rgba(255, 255, 255, 0.28);
@@ -69,6 +71,12 @@
       user-select: none;
       -webkit-user-select: none;
     }
+
+    .top-chrome {
+      flex-shrink: 0;
+      background: var(--bg-top-chrome);
+      border-bottom: 1px solid var(--border-color);
+    }
     
     .search-input {
       width: 100%;
@@ -96,8 +104,7 @@
       flex-shrink: 0;
       display: flex;
       align-items: center;
-      background: var(--bg-primary);
-      border-bottom: 1px solid var(--border-color);
+      background: transparent;
     }
     
     .search-icon {
@@ -140,9 +147,8 @@
       display: flex;
       align-items: center;
       gap: 4px;
-      padding: 6px 12px;
-      background: var(--bg-filter-bar);
-      border-bottom: 1px solid var(--border-color);
+      padding: 0 12px 8px;
+      background: transparent;
       flex-shrink: 0;
       overflow-x: auto;
       overflow-y: hidden;
@@ -160,7 +166,7 @@
       color: var(--text-secondary);
       background: transparent;
       border: 1px solid transparent;
-      border-radius: 4px;
+      border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
       transition: all 0.15s;
@@ -172,9 +178,8 @@
     
     .source-btn.active {
       background: var(--bg-secondary);
-      border-color: var(--border-color);
+      /* border-color: var(--border-color); */
       color: var(--text-primary);
-      font-weight: 600;
     }
     
     .list-container {
@@ -185,16 +190,19 @@
     
     .symbols-list {
       list-style: none;
+      padding-top:6px;
     }
     
     .symbol-item {
-      padding: 10px 16px;
+      margin: 3px 8px;
+      padding: 8px 8px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 12px;
       transition: none;
       color: var(--text-primary);
+      border-radius: 12px;
     }
     
     /* Hover disabled - was causing unwanted highlighting */
@@ -546,6 +554,7 @@
   </style>
 </head>
 <body>
+  <div class="top-chrome">
   <div class="search-wrapper">
     <svg class="search-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><defs><path id="a" d="M8 0h16a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8Z"/></defs><g fill="none" fill-rule="evenodd"><use href="#a" fill="#535DFF"/><path fill="#FFF" stroke="#535DFF" stroke-width=".809" d="m24.184 7.911-3.388 11.594a2.023 2.023 0 0 1-1.284 1.288l-10.72 3.565a.91.91 0 0 1-1.187-.721l3.602-11.15a2.023 2.023 0 0 1 1.28-1.28l10.72-3.565a.91.91 0 0 1 .977.27Zm-8.2 6.252c-.504 0-.959.204-1.288.533-.33.33-.533.784-.533 1.287 0 .503.204.958.533 1.287.33.33.784.533 1.287.533.503 0 .958-.203 1.287-.533.33-.33.534-.784.534-1.287 0-.503-.204-.958-.534-1.287a1.815 1.815 0 0 0-1.287-.533Z"/></g></svg>
     <input type="text" class="search-input" id="searchInput" placeholder="Search symbols..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -564,6 +573,7 @@
     </div>
   </div>
   <div class="source-filter" id="sourceFilter"></div>
+  </div>
   
   <div class="list-container" id="listContainer">
     <div class="loading" id="loading">
