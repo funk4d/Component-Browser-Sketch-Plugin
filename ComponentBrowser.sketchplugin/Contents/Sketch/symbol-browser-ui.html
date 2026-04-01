@@ -16,45 +16,51 @@
       --accent-hover: #4a52e0;
       
       /* Dark theme (default) */
-      --bg-primary: #1e1e1e;
-      --bg-secondary: #2d2d2d;
-      --bg-tertiary: #252525;
-      --bg-input: #1e1e1e;
-      --bg-input-focus: #323232;
+      --bg-primary: rgba(30, 30, 30, 0.56);
+      --bg-secondary: rgba(45, 45, 45, 0.54);
+      --bg-tertiary: rgba(37, 37, 37, 0.62);
+      --bg-filter-bar: rgba(37, 37, 37, 0.72);
+      --bg-input: rgba(30, 30, 30, 0.18);
+      --bg-input-focus: rgba(50, 50, 50, 0.3);
       --text-primary: #e0e0e0;
       --text-secondary: #888;
       --text-tertiary: #ccc;
-      --border-color: #3d3d3d;
-      --item-hover: #2d2d2d;
+      --border-color: rgba(255, 255, 255, 0.12);
+      --item-hover: rgba(255, 255, 255, 0.06);
       --item-selected-text: #fff;
       --library-text: #888;
-      --key-bg: #2d2d2d;
-      --key-border: #4d4d4d;
+      --key-bg: rgba(255, 255, 255, 0.06);
+      --key-border: rgba(255, 255, 255, 0.12);
     }
     
     /* Light theme */
     @media (prefers-color-scheme: light) {
       :root {
-        --bg-primary: #f5f5f5;
-        --bg-secondary: #ffffff;
-        --bg-tertiary: #f0f0f0;
-        --bg-input: #ffffff;
-        --bg-input-focus: #f8f8f8;
+        --bg-primary: rgba(245, 245, 245, 0.62);
+        --bg-secondary: rgba(255, 255, 255, 0.72);
+        --bg-tertiary: rgba(240, 240, 240, 0.72);
+        --bg-filter-bar: rgba(243, 243, 243, 0.86);
+        --bg-input: rgba(255, 255, 255, 0.18);
+        --bg-input-focus: rgba(255, 255, 255, 0.28);
         --text-primary: #333333;
         --text-secondary: #666666;
         --text-tertiary: #555555;
-        --border-color: #e0e0e0;
-        --item-hover: #e8e8e8;
+        --border-color: rgba(0, 0, 0, 0.1);
+        --item-hover: rgba(0, 0, 0, 0.05);
         --item-selected-text: #ffffff;
         --library-text: #888888;
-        --key-bg: #e8e8e8;
-        --key-border: #cccccc;
+        --key-bg: rgba(0, 0, 0, 0.05);
+        --key-border: rgba(0, 0, 0, 0.12);
       }
     }
     
+    html {
+      background: transparent;
+    }
+
     body { 
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg-primary);
+      background: transparent;
       color: var(--text-primary);
       height: 100vh;
       display: flex;
@@ -70,7 +76,7 @@
       border: none;
       font-size: 17px;
       outline: none;
-      background: var(--bg-primary);
+      background: transparent;
       color: var(--text-primary);
       flex-shrink: 0;
       z-index: 10;
@@ -90,6 +96,8 @@
       flex-shrink: 0;
       display: flex;
       align-items: center;
+      background: var(--bg-primary);
+      border-bottom: 1px solid var(--border-color);
     }
     
     .search-icon {
@@ -101,22 +109,20 @@
       z-index: 20;
     }
     
-    .search-loader {
+    .loading-status {
       position: absolute;
-      right: 12px;
+      right: 24px;
       top: 50%;
-      width: 16px;
-      height: 16px;
-      margin-top: -8px;
-      border: 2px solid var(--border-color);
-      border-top-color: var(--accent-color);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      transform: translateY(-50%);
       display: none;
+      align-items: center;
+      justify-content: flex-end;
+      pointer-events: none;
+      z-index: 25;
     }
-    
-    .search-loader.visible {
-      display: block;
+
+    .loading-status.visible {
+      display: flex;
     }
     
     @keyframes spin {
@@ -132,13 +138,15 @@
     
     .source-filter {
       display: flex;
+      align-items: center;
       gap: 4px;
       padding: 6px 12px;
-      background: var(--bg-primary);
+      background: var(--bg-filter-bar);
       border-bottom: 1px solid var(--border-color);
       flex-shrink: 0;
       overflow-x: auto;
-      margin-top:-4px;
+      overflow-y: hidden;
+      scrollbar-width: none;
     }
     
     .source-filter::-webkit-scrollbar {
@@ -150,8 +158,8 @@
       font-size: 11px;
       font-weight: 500;
       color: var(--text-secondary);
-      background: var(--bg-primary);
-      border: 1px solid var(--bg-primary);
+      background: transparent;
+      border: 1px solid transparent;
       border-radius: 4px;
       cursor: pointer;
       white-space: nowrap;
@@ -159,14 +167,14 @@
     }
     
     .source-btn:hover {
-      background: var(--item-hover);
-      color: var(--text-tertiary);
+      color: var(--text-primary);
     }
     
     .source-btn.active {
       background: var(--bg-secondary);
       border-color: var(--border-color);
       color: var(--text-primary);
+      font-weight: 600;
     }
     
     .list-container {
@@ -363,9 +371,177 @@
     }
     
     .loading {
-      text-align: center;
-      padding: 40px;
+      height: 100%;
+      min-height: 220px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
       color: var(--text-secondary);
+    }
+
+    .spinner {
+      font-size: 24px;
+      position: relative;
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      flex-shrink: 0;
+    }
+
+    .spinner .spinner-blade {
+      position: absolute;
+      left: 0.4629em;
+      bottom: 0;
+      width: 0.074em;
+      height: 0.2777em;
+      border-radius: 0.0555em;
+      background-color: transparent;
+      -webkit-transform-origin: center -0.2222em;
+      transform-origin: center -0.2222em;
+      animation: spinner-fade9234 1s infinite linear;
+    }
+
+    .spinner .spinner-blade:nth-child(1) {
+      animation-delay: 0s;
+      transform: rotate(0deg);
+    }
+
+    .spinner .spinner-blade:nth-child(2) {
+      animation-delay: 0.083s;
+      transform: rotate(30deg);
+    }
+
+    .spinner .spinner-blade:nth-child(3) {
+      animation-delay: 0.166s;
+      transform: rotate(60deg);
+    }
+
+    .spinner .spinner-blade:nth-child(4) {
+      animation-delay: 0.249s;
+      transform: rotate(90deg);
+    }
+
+    .spinner .spinner-blade:nth-child(5) {
+      animation-delay: 0.332s;
+      transform: rotate(120deg);
+    }
+
+    .spinner .spinner-blade:nth-child(6) {
+      animation-delay: 0.415s;
+      transform: rotate(150deg);
+    }
+
+    .spinner .spinner-blade:nth-child(7) {
+      animation-delay: 0.498s;
+      transform: rotate(180deg);
+    }
+
+    .spinner .spinner-blade:nth-child(8) {
+      animation-delay: 0.581s;
+      transform: rotate(210deg);
+    }
+
+    .spinner .spinner-blade:nth-child(9) {
+      animation-delay: 0.664s;
+      transform: rotate(240deg);
+    }
+
+    .spinner .spinner-blade:nth-child(10) {
+      animation-delay: 0.747s;
+      transform: rotate(270deg);
+    }
+
+    .spinner .spinner-blade:nth-child(11) {
+      animation-delay: 0.83s;
+      transform: rotate(300deg);
+    }
+
+    .spinner .spinner-blade:nth-child(12) {
+      animation-delay: 0.913s;
+      transform: rotate(330deg);
+    }
+
+    .loading-label {
+      --loader-label-color: var(--text-secondary);
+      --loader-word-color: var(--accent-color);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-weight: 600;
+      font-size: 17px;
+      -webkit-box-sizing: content-box;
+      box-sizing: content-box;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      line-height: 24px;
+    }
+
+    .loading-label p {
+      margin: 0;
+      line-height: 24px;
+      color: var(--loader-label-color);
+    }
+
+    .loading-label .words {
+      overflow: hidden;
+      position: relative;
+      height: 24px;
+      margin-left: 6px;
+    }
+
+    .loading-label .word {
+      display: block;
+      height: 24px;
+      line-height: 24px;
+      color: var(--loader-word-color);
+      font-weight: 650;
+      animation: spin_4991 4s infinite;
+      will-change: transform;
+    }
+
+    @keyframes spinner-fade9234 {
+      0% {
+        background-color: var(--text-secondary);
+      }
+
+      100% {
+        background-color: transparent;
+      }
+    }
+
+    @keyframes spin_4991 {
+      10% {
+        transform: translateY(-102%);
+      }
+
+      25% {
+        transform: translateY(-100%);
+      }
+
+      35% {
+        transform: translateY(-202%);
+      }
+
+      50% {
+        transform: translateY(-200%);
+      }
+
+      60% {
+        transform: translateY(-302%);
+      }
+
+      75% {
+        transform: translateY(-300%);
+      }
+
+      85% {
+        transform: translateY(-402%);
+      }
+
+      100% {
+        transform: translateY(-400%);
+      }
     }
   </style>
 </head>
@@ -373,12 +549,39 @@
   <div class="search-wrapper">
     <svg class="search-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><defs><path id="a" d="M8 0h16a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8Z"/></defs><g fill="none" fill-rule="evenodd"><use href="#a" fill="#535DFF"/><path fill="#FFF" stroke="#535DFF" stroke-width=".809" d="m24.184 7.911-3.388 11.594a2.023 2.023 0 0 1-1.284 1.288l-10.72 3.565a.91.91 0 0 1-1.187-.721l3.602-11.15a2.023 2.023 0 0 1 1.28-1.28l10.72-3.565a.91.91 0 0 1 .977.27Zm-8.2 6.252c-.504 0-.959.204-1.288.533-.33.33-.533.784-.533 1.287 0 .503.204.958.533 1.287.33.33.784.533 1.287.533.503 0 .958-.203 1.287-.533.33-.33.534-.784.534-1.287 0-.503-.204-.958-.534-1.287a1.815 1.815 0 0 0-1.287-.533Z"/></g></svg>
     <input type="text" class="search-input" id="searchInput" placeholder="Search symbols..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <div class="search-loader" id="searchLoader"></div>
+    <div class="loading-status" id="loadingStatus" aria-live="polite">
+      <div class="loading-label">
+        <p>loading</p>
+        <div class="words">
+          <span class="word">items</span>
+          <span class="word">buttons</span>
+          <span class="word">icons</span>
+          <span class="word">forms</span>
+          <span class="word">logos</span>
+          <span class="word">items</span>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="source-filter" id="sourceFilter"></div>
   
   <div class="list-container" id="listContainer">
-    <div class="loading" id="loading">Loading symbols...</div>
+    <div class="loading" id="loading">
+      <div class="spinner" aria-hidden="true">
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+        <div class="spinner-blade"></div>
+      </div>
+    </div>
     <ul class="symbols-list" id="symbolsList" style="display: none;"></ul>
     <div class="empty-state" id="emptyState" style="display: none;">
       <div>No symbols found</div>
@@ -420,6 +623,9 @@
     let allSymbols = [];
     let filteredSymbols = [];
     let selectedIndex = -1;
+    let isLoadingSymbols = false;
+    let searchTouched = false;
+    let liveSearchQuery = '';
     
     const PLACEHOLDER_COLORS = [
       '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
@@ -433,7 +639,8 @@
     const statsEl = document.getElementById('stats');
     const listContainer = document.getElementById('listContainer');
     const sourceFilter = document.getElementById('sourceFilter');
-    const searchLoader = document.getElementById('searchLoader');
+    const loadingStatus = document.getElementById('loadingStatus');
+    const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
     
     let currentSourceFilter = 'All';
     let availableSources = ['All', 'Local'];
@@ -546,12 +753,37 @@
     }
     
     window.setLoading = function(loading) {
-      if (searchLoader) {
-        searchLoader.classList.toggle('visible', loading);
+      isLoadingSymbols = !!loading;
+      if (loadingStatus) {
+        loadingStatus.classList.toggle('visible', loading);
       }
       if (searchInput) {
-        searchInput.style.paddingRight = loading ? '36px' : '16px';
+        searchInput.style.paddingRight = loading ? '220px' : '16px';
       }
+      if (loadingEl) {
+        loadingEl.style.display = loading ? 'flex' : 'none';
+      }
+      if (loading) {
+        symbolsList.style.display = 'none';
+        emptyState.style.display = 'none';
+        statsEl.textContent = 'Loading...';
+      }
+    };
+
+    window.focusSearchInput = function(selectTextIfIdle) {
+      if (!searchInput) return;
+
+      searchInput.focus();
+
+      if (selectTextIfIdle && !searchTouched && !searchInput.value.trim()) {
+        searchInput.select();
+        return;
+      }
+
+      try {
+        const caret = searchInput.value.length;
+        searchInput.setSelectionRange(caret, caret);
+      } catch (e) {}
     };
     
     window.loadSymbols = function(symbols, savedQuery) {
@@ -567,6 +799,7 @@
       }
       
       allSymbols = symbols || [];
+      isLoadingSymbols = false;
       requestedPreviews.clear();
       loadedPreviews.clear();
       queuedPreviews.clear();
@@ -581,7 +814,6 @@
           requestedPreviews.add(symbol.id);
         }
       });
-      loadingEl.style.display = 'none';
       
       // Hide loader
       window.setLoading(false);
@@ -591,36 +823,69 @@
         emptyState.style.display = 'block';
         statsEl.textContent = 'No symbols found';
       } else {
-        // Apply saved search if exists
-        if (savedQuery && savedQuery.trim()) {
-          searchInput.value = savedQuery;
+        const effectiveQuery = liveSearchQuery && liveSearchQuery.trim()
+          ? liveSearchQuery
+          : ((savedQuery && savedQuery.trim()) ? savedQuery : searchInput.value);
+
+        if (searchInput.value !== effectiveQuery) {
+          searchInput.value = effectiveQuery;
         }
+        liveSearchQuery = searchInput.value;
+        searchTouched = searchTouched || !!liveSearchQuery.trim();
         
         // Apply current source filter and search
         applyFilters();
         renderSourceFilter();
       }
       
-      // Focus and select search input immediately (don't wait for symbols)
-      searchInput.focus();
-      searchInput.select();
+      // Do not steal focus/selection if the user already started typing while loading.
+      if (!searchTouched) {
+        window.focusSearchInput(true);
+      }
     };
+
+    function isDarkThemeEnabled() {
+      return !!(themeMediaQuery && themeMediaQuery.matches);
+    }
+
+    function getSymbolKindIconKey(symbol, isSelected) {
+      const isLocal = symbol && symbol.isOriginallyLocal === true;
+      if (isSelected || isDarkThemeEnabled()) {
+        return isLocal ? 'local_light' : 'library_light';
+      }
+      return isLocal ? 'local_dark' : 'library_dark';
+    }
+
+    function getSymbolKindIconSvg(symbol, isSelected) {
+      return ICONS[getSymbolKindIconKey(symbol, isSelected)];
+    }
+
+    function updateKindBadgeForListItem(listItem, index, isSelected) {
+      if (!listItem) return;
+
+      const badge = listItem.querySelector('.symbol-kind-badge');
+      const symbol = filteredSymbols[index];
+      if (!badge || !symbol) return;
+
+      badge.innerHTML = getSymbolKindIconSvg(symbol, isSelected);
+    }
+
+    function refreshKindBadgesInList() {
+      const items = symbolsList.querySelectorAll('.symbol-item');
+      items.forEach((item) => {
+        const index = Number(item.getAttribute('data-index'));
+        if (!Number.isFinite(index) || index < 0) return;
+        updateKindBadgeForListItem(item, index, index === selectedIndex);
+      });
+    }
     
     function renderSymbols() {
       const query = searchInput.value.toLowerCase().trim();
       const queryParts = query ? query.replace(/[\/\-_]/g, ' ').split(/\s+/).filter(p => p.length > 0) : [];
-      const isDarkTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       
       symbolsList.innerHTML = filteredSymbols.map((symbol, index) => {
-        const isLocal = symbol.isOriginallyLocal === true;
         const isSelected = index === selectedIndex;
-        
-        // Keep icon variant independent from selection to avoid full list rerenders on ↑/↓.
-        const iconKey = isDarkTheme
-          ? (isLocal ? 'local_light' : 'library_light')
-          : (isLocal ? 'local_dark' : 'library_dark');
-        
-        const iconSvg = ICONS[iconKey];
+        const iconSvg = getSymbolKindIconSvg(symbol, isSelected);
         const previewColor = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
         const previewInitial = escapeHtml(symbol.name.charAt(0).toUpperCase());
         const thumbHtml = symbol.preview
@@ -654,6 +919,7 @@
         const previousEl = symbolsList.querySelector(`.symbol-item[data-index="${previousIndex}"]`);
         if (previousEl) {
           previousEl.classList.remove('selected');
+          updateKindBadgeForListItem(previousEl, previousIndex, false);
         }
       }
 
@@ -661,6 +927,7 @@
         const nextEl = symbolsList.querySelector(`.symbol-item[data-index="${nextIndex}"]`);
         if (nextEl) {
           nextEl.classList.add('selected');
+          updateKindBadgeForListItem(nextEl, nextIndex, true);
         }
       }
     }
@@ -749,6 +1016,16 @@
     }
     
     function applyFilters() {
+      if (isLoadingSymbols && allSymbols.length === 0) {
+        if (loadingEl) {
+          loadingEl.style.display = 'flex';
+        }
+        symbolsList.style.display = 'none';
+        emptyState.style.display = 'none';
+        statsEl.textContent = 'Loading...';
+        return;
+      }
+
       const query = searchInput.value.toLowerCase().trim();
       
       // Save currently selected symbol ID before filtering
@@ -855,7 +1132,14 @@
     // Search
     let searchTimeout;
     searchInput.addEventListener('input', (e) => {
+      liveSearchQuery = e.target.value;
+      searchTouched = true;
       clearTimeout(searchTimeout);
+
+      if (isLoadingSymbols && allSymbols.length === 0) {
+        return;
+      }
+
       searchTimeout = setTimeout(() => {
         applyFilters();
       }, 150);
@@ -877,6 +1161,18 @@
         requestPreviewsForVisibleItems();
       }
     }, 700);
+
+    if (themeMediaQuery) {
+      const handleThemeChange = () => {
+        refreshKindBadgesInList();
+      };
+
+      if (typeof themeMediaQuery.addEventListener === 'function') {
+        themeMediaQuery.addEventListener('change', handleThemeChange);
+      } else if (typeof themeMediaQuery.addListener === 'function') {
+        themeMediaQuery.addListener(handleThemeChange);
+      }
+    }
     
     // Stop interval after 30 seconds to save resources
     setTimeout(() => {
