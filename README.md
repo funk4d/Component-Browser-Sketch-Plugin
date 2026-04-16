@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="github/component-browser-icon.png" alt="Component Browser logo" width="120" height="120">
+</p>
+
 # 🧭 Component Browser
 
 A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Components) from your document and libraries.
