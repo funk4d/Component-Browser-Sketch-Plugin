@@ -18,8 +18,12 @@ A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Compon
 
 ## Installation
 
-1. Download the latest release: [Component Browser.sketchplugin](https://github.com/funk4d/Component-Browser-Sketch-Plugin/releases/latest)
-2. Double-click to install in Sketch
+1. Open the [latest release](https://github.com/funk4d/Component-Browser-Sketch-Plugin/releases/latest)
+2. Download `ComponentBrowser.sketchplugin.zip`
+3. Unzip it if your browser did not extract it automatically
+4. Double-click `ComponentBrowser.sketchplugin` to install it in Sketch
+
+> Note: The release asset for Sketch updates should be a ZIP archive that contains the `ComponentBrowser.sketchplugin` bundle. A renamed ZIP file with a `.sketchplugin` extension will not install correctly when opened directly in Sketch.
 
 ## Usage
 
@@ -68,6 +72,10 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 ## Credits
 
 Created by [Dmytro Shevchuk](https://github.com/funk4d)
+
+## Releasing
+
+See [RELEASING.md](RELEASING.md) for the expected release package format and the appcast checklist.
 
 ## License
 

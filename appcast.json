@@ -1,5 +1,8 @@
 {
+  "itemName": "Component Browser",
   "version": "1.2.1",
   "downloadURL": "https://github.com/funk4d/Component-Browser-Sketch-Plugin/releases/download/v1.2.1/ComponentBrowser.sketchplugin.zip",
-  "versionID": "v1.2.1"
+  "versionID": "1.2.1",
+  "downloadFileSize": 42090,
+  "creationDate": "Mon, 20 Apr 2026 12:57:29 +0000"
 }
