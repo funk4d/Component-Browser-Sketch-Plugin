@@ -23,8 +23,6 @@ A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Compon
 3. Unzip it if your browser did not extract it automatically
 4. Double-click `ComponentBrowser.sketchplugin` to install it in Sketch
 
-> Note: The release asset for Sketch updates should be a ZIP archive that contains the `ComponentBrowser.sketchplugin` bundle. A renamed ZIP file with a `.sketchplugin` extension will not install correctly when opened directly in Sketch.
-
 ## Usage
 
 ### Open Component Browser
