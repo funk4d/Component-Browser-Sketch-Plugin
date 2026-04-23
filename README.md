@@ -71,10 +71,6 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 
 Created by [Dmytro Shevchuk](https://github.com/funk4d)
 
-## Releasing
-
-See [RELEASING.md](RELEASING.md) for the expected release package format and the appcast checklist.
-
 ## License
 
 MIT
