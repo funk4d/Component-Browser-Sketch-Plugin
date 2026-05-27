@@ -190,31 +190,62 @@
     
     .symbols-list {
       list-style: none;
-      padding-top:6px;
+      padding: 6px 0;
+      margin: 0;
+      box-sizing: border-box;
     }
-    
+
+    /* Empty placeholder elements used by the virtual scroller to preserve the
+       total scrollHeight when items above/below the viewport are not in DOM. */
+    .virt-spacer {
+      list-style: none;
+      pointer-events: none;
+      margin: 0;
+    }
+
+    /* Each .symbol-item occupies exactly ITEM_SLOT (52px) so the virtual
+       scroller's offset math is exact. The selected "pill" is drawn by a
+       ::before pseudo inset by 3px to give visual breathing room without
+       breaking the slot height. */
     .symbol-item {
-      margin: 3px 8px;
-      padding: 8px 8px;
+      position: relative;
+      height: 52px;
+      margin: 0;
+      padding: 0 16px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 12px;
       transition: none;
       color: var(--text-primary);
-      border-radius: 12px;
+      box-sizing: border-box;
     }
-    
-    /* Hover disabled - was causing unwanted highlighting */
-    /* .symbol-item:hover {
-      background: var(--item-hover);
-    } */
-    
-    .symbol-item.selected {
+
+    .symbol-item::before {
+      content: '';
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      top: 3px;
+      bottom: 3px;
+      border-radius: 12px;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    .symbol-item > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .symbol-item.selected::before {
       background: var(--accent-color);
+    }
+
+    .symbol-item.selected {
       color: var(--item-selected-text);
     }
-    
+
     .symbol-item.selected .symbol-library {
       color: rgba(255,255,255,0.7);
     }
@@ -470,44 +501,6 @@
       transform: rotate(330deg);
     }
 
-    .loading-label {
-      --loader-label-color: var(--text-secondary);
-      --loader-word-color: var(--accent-color);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-weight: 600;
-      font-size: 17px;
-      -webkit-box-sizing: content-box;
-      box-sizing: content-box;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      overflow: hidden;
-      line-height: 24px;
-    }
-
-    .loading-label p {
-      margin: 0;
-      line-height: 24px;
-      color: var(--loader-label-color);
-    }
-
-    .loading-label .words {
-      overflow: hidden;
-      position: relative;
-      height: 24px;
-      margin-left: 6px;
-    }
-
-    .loading-label .word {
-      display: block;
-      height: 24px;
-      line-height: 24px;
-      color: var(--loader-word-color);
-      font-weight: 650;
-      animation: spin_4991 4s infinite;
-      will-change: transform;
-    }
-
     @keyframes spinner-fade9234 {
       0% {
         background-color: var(--text-secondary);
@@ -517,40 +510,6 @@
         background-color: transparent;
       }
     }
-
-    @keyframes spin_4991 {
-      10% {
-        transform: translateY(-102%);
-      }
-
-      25% {
-        transform: translateY(-100%);
-      }
-
-      35% {
-        transform: translateY(-202%);
-      }
-
-      50% {
-        transform: translateY(-200%);
-      }
-
-      60% {
-        transform: translateY(-302%);
-      }
-
-      75% {
-        transform: translateY(-300%);
-      }
-
-      85% {
-        transform: translateY(-402%);
-      }
-
-      100% {
-        transform: translateY(-400%);
-      }
-    }
   </style>
 </head>
 <body>
@@ -558,19 +517,6 @@
   <div class="search-wrapper">
     <svg class="search-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><defs><path id="a" d="M8 0h16a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8Z"/></defs><g fill="none" fill-rule="evenodd"><use href="#a" fill="#535DFF"/><path fill="#FFF" stroke="#535DFF" stroke-width=".809" d="m24.184 7.911-3.388 11.594a2.023 2.023 0 0 1-1.284 1.288l-10.72 3.565a.91.91 0 0 1-1.187-.721l3.602-11.15a2.023 2.023 0 0 1 1.28-1.28l10.72-3.565a.91.91 0 0 1 .977.27Zm-8.2 6.252c-.504 0-.959.204-1.288.533-.33.33-.533.784-.533 1.287 0 .503.204.958.533 1.287.33.33.784.533 1.287.533.503 0 .958-.203 1.287-.533.33-.33.534-.784.534-1.287 0-.503-.204-.958-.534-1.287a1.815 1.815 0 0 0-1.287-.533Z"/></g></svg>
     <input type="text" class="search-input" id="searchInput" placeholder="Search symbols..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <div class="loading-status" id="loadingStatus" aria-live="polite">
-      <div class="loading-label">
-        <p>loading</p>
-        <div class="words">
-          <span class="word">items</span>
-          <span class="word">buttons</span>
-          <span class="word">icons</span>
-          <span class="word">forms</span>
-          <span class="word">logos</span>
-          <span class="word">items</span>
-        </div>
-      </div>
-    </div>
   </div>
   <div class="source-filter" id="sourceFilter"></div>
   </div>
@@ -627,9 +573,11 @@
   </div>
 
   <script>
-    // Initial data injected by plugin
-    window.INITIAL_SYMBOLS = null;
-    
+    // Initial data may be injected by the plugin as a separate <script> tag in
+    // <head>, before this file's main script runs. Don't reassign here — that
+    // would overwrite the injection. The DOMContentLoaded handler reads these
+    // optional globals lazily and tolerates undefined.
+
     let allSymbols = [];
     let filteredSymbols = [];
     let selectedIndex = -1;
@@ -649,7 +597,6 @@
     const statsEl = document.getElementById('stats');
     const listContainer = document.getElementById('listContainer');
     const sourceFilter = document.getElementById('sourceFilter');
-    const loadingStatus = document.getElementById('loadingStatus');
     const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
     
     let currentSourceFilter = 'All';
@@ -667,7 +614,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       if (window.INITIAL_SYMBOLS) {
         console.log('Auto-loading initial symbols:', window.INITIAL_SYMBOLS.length);
-        window.loadSymbols(window.INITIAL_SYMBOLS, '');
+        window.loadSymbols(window.INITIAL_SYMBOLS, window.INITIAL_UI_STATE || '');
       }
     });
     
@@ -675,9 +622,25 @@
     const requestedPreviews = new Set();
     const loadedPreviews = new Set();
     const queuedPreviews = new Set();
+    const previewRequestTimestamps = new Map();
+    const previewRetryCounts = new Map();
     const previewDispatchQueue = [];
     const PREVIEW_DISPATCH_DELAY_MS = 8;
+    const PREVIEW_REQUEST_TIMEOUT_MS = 4000;
+    const MAX_PREVIEW_RETRIES = 4;
+    const BACKGROUND_PREVIEW_BATCH_SIZE = 3;
+    const BACKGROUND_PREVIEW_INTERVAL_MS = 900;
     let previewDispatchTimer = null;
+    let previewBackgroundInterval = null;
+
+    // Virtualized list rendering: keep only ~visible items in the DOM. With
+    // 5000+ symbols a full render takes seconds because WebKit lays out every
+    // <li>. ITEM_SLOT must equal the actual rendered height of .symbol-item
+    // (see CSS, currently 52px).
+    const ITEM_SLOT = 52;
+    const VIRT_BUFFER = 8;
+    const LIST_VERTICAL_PADDING = 6;
+    let virtScrollRafQueued = false;
     
     window.updateSymbolPreview = function(symbolId, previewData) {
       // Update preview in allSymbols
@@ -693,6 +656,8 @@
       loadedPreviews.add(symbolId);
       requestedPreviews.add(symbolId);
       queuedPreviews.delete(symbolId);
+      previewRequestTimestamps.delete(symbolId);
+      previewRetryCounts.delete(symbolId);
       updatePreviewThumbnailInList(symbolId, previewData);
     };
     
@@ -714,6 +679,58 @@
       }
     };
     
+    function stopBackgroundPreviewMonitor() {
+      if (previewBackgroundInterval) {
+        clearInterval(previewBackgroundInterval);
+        previewBackgroundInterval = null;
+      }
+    }
+
+    function resetStuckPreviewRequest(symbolId) {
+      if (!requestedPreviews.has(symbolId)) {
+        return false;
+      }
+
+      const startedAt = previewRequestTimestamps.get(symbolId);
+      if (!startedAt || (Date.now() - startedAt) < PREVIEW_REQUEST_TIMEOUT_MS) {
+        return false;
+      }
+
+      const retryCount = previewRetryCounts.get(symbolId) || 0;
+      if (retryCount >= MAX_PREVIEW_RETRIES) {
+        return false;
+      }
+
+      requestedPreviews.delete(symbolId);
+      previewRequestTimestamps.delete(symbolId);
+      return true;
+    }
+
+    function canRequestPreview(symbolId, allowRetry) {
+      if (!symbolId || loadedPreviews.has(symbolId) || queuedPreviews.has(symbolId)) {
+        return false;
+      }
+
+      if (!requestedPreviews.has(symbolId)) {
+        return true;
+      }
+
+      return allowRetry ? resetStuckPreviewRequest(symbolId) : false;
+    }
+
+    function markPreviewRequestStarted(symbolId) {
+      requestedPreviews.add(symbolId);
+      queuedPreviews.delete(symbolId);
+      previewRequestTimestamps.set(symbolId, Date.now());
+      previewRetryCounts.set(symbolId, (previewRetryCounts.get(symbolId) || 0) + 1);
+    }
+
+    function sendPreviewRequest(symbolId, priority) {
+      if (!symbolId) return;
+      markPreviewRequestStarted(symbolId);
+      alert((priority ? 'get-preview-priority:' : 'get-preview:') + symbolId);
+    }
+
     function dispatchNextPreviewRequest() {
       if (previewDispatchTimer || previewDispatchQueue.length === 0) {
         return;
@@ -721,54 +738,137 @@
 
       previewDispatchTimer = setTimeout(() => {
         previewDispatchTimer = null;
-        const symbolId = previewDispatchQueue.shift();
-        if (symbolId) {
-          queuedPreviews.delete(symbolId);
-          requestedPreviews.add(symbolId);
-          alert('get-preview:' + symbolId);
+        const nextRequest = previewDispatchQueue.shift();
+        if (nextRequest && nextRequest.symbolId) {
+          sendPreviewRequest(nextRequest.symbolId, nextRequest.priority === true);
         }
         dispatchNextPreviewRequest();
       }, PREVIEW_DISPATCH_DELAY_MS);
     }
 
-    function enqueuePreviewRequest(symbolId) {
-      if (!symbolId) return;
-      if (loadedPreviews.has(symbolId) || requestedPreviews.has(symbolId) || queuedPreviews.has(symbolId)) {
+    function enqueuePreviewRequest(symbolId, options) {
+      const requestOptions = options || {};
+      const priority = requestOptions.priority === true;
+      const allowRetry = requestOptions.allowRetry === true;
+
+      if (!canRequestPreview(symbolId, allowRetry)) {
+        return false;
+      }
+
+      if (priority) {
+        for (let i = previewDispatchQueue.length - 1; i >= 0; i--) {
+          if (previewDispatchQueue[i] && previewDispatchQueue[i].symbolId === symbolId) {
+            previewDispatchQueue.splice(i, 1);
+          }
+        }
+        queuedPreviews.add(symbolId);
+        previewDispatchQueue.unshift({ symbolId, priority: true });
+        dispatchNextPreviewRequest();
+        return true;
+      }
+
+      queuedPreviews.add(symbolId);
+      previewDispatchQueue.push({ symbolId, priority: false });
+      dispatchNextPreviewRequest();
+      return true;
+    }
+
+    function requestPriorityPreviewForSelectedSymbol() {
+      if (selectedIndex < 0 || selectedIndex >= filteredSymbols.length) {
         return;
       }
-      queuedPreviews.add(symbolId);
-      previewDispatchQueue.push(symbolId);
-      dispatchNextPreviewRequest();
+
+      const selectedSymbol = filteredSymbols[selectedIndex];
+      if (!selectedSymbol || selectedSymbol.preview) {
+        return;
+      }
+
+      enqueuePreviewRequest(selectedSymbol.id, { priority: true, allowRetry: true });
+    }
+
+    function requestBackgroundPreviews() {
+      if (isLoadingSymbols || allSymbols.length === 0) return;
+
+      let requestedCount = 0;
+      for (let i = 0; i < allSymbols.length; i++) {
+        const symbol = allSymbols[i];
+        if (!symbol || symbol.preview) {
+          continue;
+        }
+
+        const didQueue = enqueuePreviewRequest(symbol.id, { allowRetry: true });
+        if (didQueue) {
+          requestedCount += 1;
+          if (requestedCount >= BACKGROUND_PREVIEW_BATCH_SIZE) {
+            break;
+          }
+        }
+      }
+    }
+
+    function hasRemainingPreviewWork() {
+      if (isLoadingSymbols) {
+        return false;
+      }
+
+      if (queuedPreviews.size > 0 || previewDispatchQueue.length > 0) {
+        return true;
+      }
+
+      return allSymbols.some((symbol) => {
+        if (!symbol || symbol.preview) {
+          return false;
+        }
+
+        if (!requestedPreviews.has(symbol.id)) {
+          return true;
+        }
+
+        const startedAt = previewRequestTimestamps.get(symbol.id);
+        const retryCount = previewRetryCounts.get(symbol.id) || 0;
+        return !!startedAt
+          && (Date.now() - startedAt) >= PREVIEW_REQUEST_TIMEOUT_MS
+          && retryCount < MAX_PREVIEW_RETRIES;
+      });
+    }
+
+    function startBackgroundPreviewMonitor() {
+      stopBackgroundPreviewMonitor();
+
+      previewBackgroundInterval = setInterval(() => {
+        if (allSymbols.length === 0) {
+          return;
+        }
+
+        requestPriorityPreviewForSelectedSymbol();
+        requestPreviewsForVisibleItems();
+        requestBackgroundPreviews();
+
+        if (!hasRemainingPreviewWork()) {
+          stopBackgroundPreviewMonitor();
+        }
+      }, BACKGROUND_PREVIEW_INTERVAL_MS);
     }
     
     function requestPreviewsForVisibleItems() {
-      if (!listContainer || filteredSymbols.length === 0) return;
+      if (isLoadingSymbols || !listContainer || filteredSymbols.length === 0) return;
 
-      const firstItem = symbolsList.querySelector('.symbol-item');
-      const itemHeight = (firstItem && firstItem.offsetHeight) ? firstItem.offsetHeight : 52;
-      const overscan = 6;
-      const startIndex = Math.max(0, Math.floor(listContainer.scrollTop / itemHeight) - overscan);
-      const endIndex = Math.min(
-        filteredSymbols.length - 1,
-        Math.ceil((listContainer.scrollTop + listContainer.clientHeight) / itemHeight) + overscan
-      );
+      requestPriorityPreviewForSelectedSymbol();
 
-      for (let i = startIndex; i <= endIndex; i++) {
+      const { start, end } = getVirtRange();
+      for (let i = start; i < end; i++) {
         const symbol = filteredSymbols[i];
         if (!symbol || symbol.preview) {
           continue;
         }
-        enqueuePreviewRequest(symbol.id);
+        enqueuePreviewRequest(symbol.id, { allowRetry: true });
       }
     }
     
     window.setLoading = function(loading) {
       isLoadingSymbols = !!loading;
-      if (loadingStatus) {
-        loadingStatus.classList.toggle('visible', loading);
-      }
-      if (searchInput) {
-        searchInput.style.paddingRight = loading ? '220px' : '16px';
+      if (loading) {
+        stopBackgroundPreviewMonitor();
       }
       if (loadingEl) {
         loadingEl.style.display = loading ? 'flex' : 'none';
@@ -780,12 +880,18 @@
       }
     };
 
-    window.focusSearchInput = function(selectTextIfIdle) {
+    window.focusSearchInput = function(selectionMode) {
       if (!searchInput) return;
 
+      const mode = selectionMode || 'caret';
       searchInput.focus();
 
-      if (selectTextIfIdle && !searchTouched && !searchInput.value.trim()) {
+      if (mode === 'select-existing' && searchInput.value.trim()) {
+        searchInput.select();
+        return;
+      }
+
+      if (mode === 'smart' && !searchTouched && !searchInput.value.trim()) {
         searchInput.select();
         return;
       }
@@ -796,28 +902,37 @@
       } catch (e) {}
     };
     
-    window.loadSymbols = function(symbols, savedQuery) {
+    window.loadSymbols = function(symbols, savedState) {
       console.log('loadSymbols called with', symbols ? symbols.length : 0, 'symbols');
       
       // Ensure DOM is ready
       if (!symbolsList || !loadingEl) {
         console.log('DOM not ready, retrying in 100ms...');
         setTimeout(function() {
-          window.loadSymbols(symbols, savedQuery);
+          window.loadSymbols(symbols, savedState);
         }, 100);
         return;
       }
+
+      const parsedSavedState = savedState && typeof savedState === 'object'
+        ? savedState
+        : (typeof savedState === 'string'
+          ? { query: savedState }
+          : {});
       
       allSymbols = symbols || [];
       isLoadingSymbols = false;
       requestedPreviews.clear();
       loadedPreviews.clear();
       queuedPreviews.clear();
+      previewRequestTimestamps.clear();
+      previewRetryCounts.clear();
       previewDispatchQueue.length = 0;
       if (previewDispatchTimer) {
         clearTimeout(previewDispatchTimer);
         previewDispatchTimer = null;
       }
+      stopBackgroundPreviewMonitor();
       allSymbols.forEach((symbol) => {
         if (symbol && symbol.preview) {
           loadedPreviews.add(symbol.id);
@@ -835,23 +950,38 @@
       } else {
         const effectiveQuery = liveSearchQuery && liveSearchQuery.trim()
           ? liveSearchQuery
-          : ((savedQuery && savedQuery.trim()) ? savedQuery : searchInput.value);
+          : ((parsedSavedState.query && parsedSavedState.query.trim()) ? parsedSavedState.query : searchInput.value);
 
         if (searchInput.value !== effectiveQuery) {
           searchInput.value = effectiveQuery;
         }
         liveSearchQuery = searchInput.value;
         searchTouched = searchTouched || !!liveSearchQuery.trim();
-        
-        // Apply current source filter and search
-        applyFilters();
+
+        if (parsedSavedState.sourceFilter) {
+          currentSourceFilter = parsedSavedState.sourceFilter;
+        }
+
         renderSourceFilter();
+
+        if (!availableSources.includes(currentSourceFilter)) {
+          currentSourceFilter = 'All';
+          renderSourceFilter();
+        }
+
+        // Apply current source filter and search
+        applyFilters({
+          selectedId: parsedSavedState.selectedId || null,
+          scrollTop: Number.isFinite(parsedSavedState.scrollTop) ? parsedSavedState.scrollTop : null
+        });
       }
       
       // Do not steal focus/selection if the user already started typing while loading.
       if (!searchTouched) {
-        window.focusSearchInput(true);
+        window.focusSearchInput('smart');
       }
+
+      startBackgroundPreviewMonitor();
     };
 
     function isDarkThemeEnabled() {
@@ -889,37 +1019,64 @@
       });
     }
     
+    function getVirtRange() {
+      const totalCount = filteredSymbols.length;
+      if (!listContainer || totalCount === 0) {
+        return { start: 0, end: 0, total: 0 };
+      }
+      const scrollTop = Math.max(0, listContainer.scrollTop - LIST_VERTICAL_PADDING);
+      const viewportHeight = listContainer.clientHeight;
+      const rawStart = Math.floor(scrollTop / ITEM_SLOT) - VIRT_BUFFER;
+      const rawEnd = Math.ceil((scrollTop + viewportHeight) / ITEM_SLOT) + VIRT_BUFFER;
+      return {
+        start: Math.max(0, rawStart),
+        end: Math.min(totalCount, rawEnd),
+        total: totalCount
+      };
+    }
+
+    function renderSymbolItemHtml(symbol, index, isSelected, queryParts) {
+      const iconSvg = getSymbolKindIconSvg(symbol, isSelected);
+      const previewColor = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
+      const previewInitial = escapeHtml(symbol.name.charAt(0).toUpperCase());
+      const thumbHtml = symbol.preview
+        ? `<div class="symbol-thumb has-preview" style="background-image: url('${symbol.preview}');"></div>`
+        : `<div class="symbol-thumb" style="background-color: ${previewColor};"><span class="symbol-thumb-initial">${previewInitial}</span></div>`;
+      const displayName = escapeHtml(symbol.name).replace(/\//g, ' → ');
+      const highlightedName = highlightMatches(displayName, queryParts);
+      return `<li class="symbol-item ${isSelected ? 'selected' : ''}" data-index="${index}" data-symbol-id="${symbol.id}" onclick="onItemClick(${index})">${thumbHtml}<div class="symbol-info"><div class="symbol-name">${highlightedName}</div><div class="symbol-library">${escapeHtml(symbol.libraryName || 'Local')}</div></div><span class="symbol-kind-badge">${iconSvg}</span></li>`;
+    }
+
     function renderSymbols() {
       const query = searchInput.value.toLowerCase().trim();
       const queryParts = query ? query.replace(/[\/\-_]/g, ' ').split(/\s+/).filter(p => p.length > 0) : [];
-      
-      symbolsList.innerHTML = filteredSymbols.map((symbol, index) => {
-        const isSelected = index === selectedIndex;
-        const iconSvg = getSymbolKindIconSvg(symbol, isSelected);
-        const previewColor = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
-        const previewInitial = escapeHtml(symbol.name.charAt(0).toUpperCase());
-        const thumbHtml = symbol.preview
-          ? `<div class="symbol-thumb has-preview" style="background-image: url('${symbol.preview}');"></div>`
-          : `<div class="symbol-thumb" style="background-color: ${previewColor};"><span class="symbol-thumb-initial">${previewInitial}</span></div>`;
-        
-        // Highlight matching parts in name
-        const displayName = escapeHtml(symbol.name).replace(/\//g, ' → ');
-        const highlightedName = highlightMatches(displayName, queryParts);
-        
-        return `
-          <li class="symbol-item ${isSelected ? 'selected' : ''}" 
-              data-index="${index}"
-              data-symbol-id="${symbol.id}"
-              onclick="onItemClick(${index})">
-            ${thumbHtml}
-            <div class="symbol-info">
-              <div class="symbol-name">${highlightedName}</div>
-              <div class="symbol-library">${escapeHtml(symbol.libraryName || 'Local')}</div>
-            </div>
-            <span class="symbol-kind-badge">${iconSvg}</span>
-          </li>
-        `;
-      }).join('');
+
+      const { start, end, total } = getVirtRange();
+      if (total === 0) {
+        symbolsList.innerHTML = '';
+        return;
+      }
+
+      const topPad = start * ITEM_SLOT;
+      const bottomPad = (total - end) * ITEM_SLOT;
+      const parts = [];
+      if (topPad > 0) parts.push(`<li class="virt-spacer" style="height:${topPad}px"></li>`);
+      for (let i = start; i < end; i++) {
+        const symbol = filteredSymbols[i];
+        parts.push(renderSymbolItemHtml(symbol, i, i === selectedIndex, queryParts));
+      }
+      if (bottomPad > 0) parts.push(`<li class="virt-spacer" style="height:${bottomPad}px"></li>`);
+      symbolsList.innerHTML = parts.join('');
+    }
+
+    function scheduleVirtRender() {
+      if (virtScrollRafQueued) return;
+      virtScrollRafQueued = true;
+      requestAnimationFrame(() => {
+        virtScrollRafQueued = false;
+        renderSymbols();
+        requestPreviewsForVisibleItems();
+      });
     }
 
     function updateSelectedItemDOM(previousIndex, nextIndex) {
@@ -942,18 +1099,41 @@
       }
     }
 
+    function scrollIndexIntoView(index) {
+      if (!listContainer || index < 0 || index >= filteredSymbols.length) return false;
+      const itemTop = LIST_VERTICAL_PADDING + index * ITEM_SLOT;
+      const itemBottom = itemTop + ITEM_SLOT;
+      const viewTop = listContainer.scrollTop;
+      const viewBottom = viewTop + listContainer.clientHeight;
+      if (itemTop < viewTop) {
+        listContainer.scrollTop = itemTop;
+        return true;
+      }
+      if (itemBottom > viewBottom) {
+        listContainer.scrollTop = itemBottom - listContainer.clientHeight;
+        return true;
+      }
+      return false;
+    }
+
     function setSelectedIndex(index, scrollIntoViewSelected) {
       if (index < 0 || index >= filteredSymbols.length) return;
 
       const previousIndex = selectedIndex;
       selectedIndex = index;
-      updateSelectedItemDOM(previousIndex, selectedIndex);
 
+      // When the selected item is off-screen we cannot just toggle classes —
+      // it is not in the DOM. Compute the scroll position directly and
+      // re-render synchronously so keyboard navigation feels instant.
+      let scrolled = false;
       if (scrollIntoViewSelected) {
-        const selectedEl = symbolsList.querySelector(`.symbol-item[data-index="${selectedIndex}"]`);
-        if (selectedEl) {
-          selectedEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
-        }
+        scrolled = scrollIndexIntoView(selectedIndex);
+      }
+
+      if (scrolled) {
+        renderSymbols();
+      } else {
+        updateSelectedItemDOM(previousIndex, selectedIndex);
       }
 
       requestPreviewsForVisibleItems();
@@ -1017,15 +1197,34 @@
         const isActive = source === currentSourceFilter;
         return `<button class="source-btn ${isActive ? 'active' : ''}" data-source="${source}" onclick="onSourceClick('${source}')">${source}</button>`;
       }).join('');
+
+      scrollActiveSourceIntoView();
     }
-    
+
+    function scrollActiveSourceIntoView() {
+      if (!sourceFilter) return;
+      const activeBtn = sourceFilter.querySelector('.source-btn.active');
+      if (!activeBtn) return;
+      const btnLeft = activeBtn.offsetLeft;
+      const btnRight = btnLeft + activeBtn.offsetWidth;
+      const viewLeft = sourceFilter.scrollLeft;
+      const viewRight = viewLeft + sourceFilter.clientWidth;
+      if (btnLeft < viewLeft) {
+        sourceFilter.scrollLeft = btnLeft;
+      } else if (btnRight > viewRight) {
+        sourceFilter.scrollLeft = btnRight - sourceFilter.clientWidth;
+      }
+    }
+
     function onSourceClick(source) {
       currentSourceFilter = source;
       renderSourceFilter();
       applyFilters();
     }
     
-    function applyFilters() {
+    function applyFilters(options) {
+      const filterOptions = options || {};
+
       if (isLoadingSymbols && allSymbols.length === 0) {
         if (loadingEl) {
           loadingEl.style.display = 'flex';
@@ -1066,21 +1265,20 @@
       
       // Try to restore previous selection by ID only if search query exists
       // If no search query, always reset to first item when switching sources
-      if (query && previousSelectedId && filteredSymbols.length > 0) {
-        const previousIndex = filteredSymbols.findIndex(s => s.id === previousSelectedId);
+      const preferredSelectedId = filterOptions.selectedId || previousSelectedId;
+
+      if (query && preferredSelectedId && filteredSymbols.length > 0) {
+        const previousIndex = filteredSymbols.findIndex(s => s.id === preferredSelectedId);
+        selectedIndex = previousIndex >= 0 ? previousIndex : 0;
+      } else if (preferredSelectedId && filteredSymbols.length > 0) {
+        const previousIndex = filteredSymbols.findIndex(s => s.id === preferredSelectedId);
         selectedIndex = previousIndex >= 0 ? previousIndex : 0;
       } else {
         selectedIndex = filteredSymbols.length > 0 ? 0 : -1;
       }
       
-      renderSymbols();
       updateStats();
-      
-      // Reset scroll to top when filtering
-      if (listContainer) {
-        listContainer.scrollTop = 0;
-      }
-      
+
       if (filteredSymbols.length === 0) {
         symbolsList.style.display = 'none';
         emptyState.style.display = 'block';
@@ -1088,8 +1286,21 @@
         symbolsList.style.display = 'block';
         emptyState.style.display = 'none';
       }
-      
-      // Request previews for items currently visible in the list
+
+      // First render: gives the list a correct scrollHeight (via spacers) so
+      // the subsequent scrollTop assignment can land at the requested position.
+      // The scroll event from that assignment will fire scheduleVirtRender to
+      // redraw the now-visible items.
+      renderSymbols();
+
+      if (listContainer) {
+        if (Number.isFinite(filterOptions.scrollTop)) {
+          listContainer.scrollTop = filterOptions.scrollTop;
+        } else {
+          listContainer.scrollTop = 0;
+        }
+      }
+
       requestAnimationFrame(() => {
         requestPreviewsForVisibleItems();
       });
@@ -1136,6 +1347,7 @@
         const action = replace ? 'replace-symbol:' : 'insert-symbol:';
         const preserveFlag = replace ? (preserveDims ? ':preserve' : ':original') : '';
         alert(action + symbolId + preserveFlag);
+        alert('close-browser:' + getUiStatePayload());
       }
     }
     
@@ -1155,22 +1367,17 @@
       }, 150);
     });
     
-    // Load previews on scroll
-    let scrollPreviewRaf = null;
+    // On scroll: re-render the virtualized list (with the new visible window)
+    // and re-request previews. Throttled via rAF inside scheduleVirtRender.
     listContainer.addEventListener('scroll', () => {
-      if (scrollPreviewRaf !== null) return;
-      scrollPreviewRaf = requestAnimationFrame(() => {
-        scrollPreviewRaf = null;
-        requestPreviewsForVisibleItems();
-      });
+      scheduleVirtRender();
+    }, { passive: true });
+
+    // Window resize changes clientHeight, which changes how many items fit
+    // in the viewport — re-render to pick up the new visible range.
+    window.addEventListener('resize', () => {
+      scheduleVirtRender();
     });
-    
-    // Periodically check for new visible items.
-    let previewInterval = setInterval(() => {
-      if (filteredSymbols.length > 0) {
-        requestPreviewsForVisibleItems();
-      }
-    }, 700);
 
     if (themeMediaQuery) {
       const handleThemeChange = () => {
@@ -1183,11 +1390,6 @@
         themeMediaQuery.addListener(handleThemeChange);
       }
     }
-    
-    // Stop interval after 30 seconds to save resources
-    setTimeout(() => {
-      clearInterval(previewInterval);
-    }, 30000);
     
     // Keyboard navigation - works globally
     document.addEventListener('keydown', (e) => {
@@ -1214,8 +1416,7 @@
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        saveSearch();
-        window.close();
+        alert('close-browser:' + getUiStatePayload());
       } else if (e.key === 'Tab') {
         e.preventDefault();
         if (e.shiftKey) {
@@ -1230,9 +1431,8 @@
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
-    
+
     searchInput.addEventListener('mousedown', (e) => {
-      // Always drag on search input
       isDragging = true;
       dragStartX = e.screenX;
       dragStartY = e.screenY;
@@ -1257,13 +1457,18 @@
       }
     });
     
-    // Save search helper
-    function saveSearch() {
-      const query = searchInput.value;
-      alert('save-search:' + query);
+    function getUiStatePayload() {
+      const selectedSymbol = selectedIndex >= 0 && filteredSymbols[selectedIndex]
+        ? filteredSymbols[selectedIndex]
+        : null;
+      const state = {
+        query: searchInput.value || '',
+        sourceFilter: currentSourceFilter || 'All',
+        selectedId: selectedSymbol ? selectedSymbol.id : null,
+        scrollTop: listContainer ? listContainer.scrollTop : 0
+      };
+      return encodeURIComponent(JSON.stringify(state));
     }
-    
-    // Note: search is saved on window close via ESC or close button
   </script>
 </body>
 </html>
