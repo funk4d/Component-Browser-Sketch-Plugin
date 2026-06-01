@@ -11,6 +11,7 @@
   "name": "Component Browser",
   "identifier": "com.funkyplugins.componentbrowser",
   "version": "1.2.1",
+  "appcast": "https://raw.githubusercontent.com/funk4d/Component-Browser-Sketch-Plugin/main/appcast.json",
   "description": "Browse and insert Symbols/Components",
   "author": "Dmytro Shevchuk",
   "icon": "icon.png",
