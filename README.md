@@ -38,6 +38,7 @@ A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Compon
 | `Shift + Tab` | Previous source filter |
 | `Enter` | Insert selected symbol at viewport center |
 | `Shift + Enter` | **Replace** selected layer(s) with symbol |
+| `Option/Alt + Enter` | Jump to symbol |
 | `Esc` | Close browser |
 
 ### Source Filters
