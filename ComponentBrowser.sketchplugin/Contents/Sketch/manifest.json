@@ -1,16 +1,32 @@
 {
   "commands": [
     {
-      "name": "🧭 Component Browser",
+      "name": "Launch",
       "identifier": "browse-components",
       "script": "symbol-browser.js",
       "handler": "onRun",
       "shortcut": "cmd shift ;"
+    },
+    {
+      "name": "Settings",
+      "identifier": "open-settings",
+      "script": "symbol-browser.js",
+      "handler": "onRunSettings"
+    },
+    {
+      "identifier": "component-browser-agent",
+      "script": "symbol-browser.js",
+      "handlers": {
+        "actions": {
+          "Startup": "onStartup",
+          "Shutdown": "onShutdown"
+        }
+      }
     }
   ],
-  "name": "Component Browser",
+  "name": "🧭 Component Browser",
   "identifier": "com.funkyplugins.componentbrowser",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "appcast": "https://raw.githubusercontent.com/funk4d/Component-Browser-Sketch-Plugin/main/appcast.json",
   "description": "Browse and insert Symbols/Components",
   "author": "Dmytro Shevchuk",
@@ -18,10 +34,10 @@
   "compatibleVersion": 3,
   "bundleVersion": 2,
   "menu": {
-    "title": "Component Browser",
-    "isRoot": true,
+    "title": "🧭 Component Browser",
     "items": [
-      "browse-components"
+      "browse-components",
+      "open-settings"
     ]
   },
   "disableCocoaScriptPreprocessor": true

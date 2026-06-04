@@ -62,7 +62,7 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 ## Roadmap
 
 - [x] Add symbol preview thumbnails
-- [ ] Add customization (settings/preferences)
+- [x] Add customization (settings/preferences)
 - [ ] Integrate search for free icon libraries (e.g., Remix Icon)
 - [ ] Explore menu command introspection/execution (File, Edit, Window, Help, Plugins)
 - [ ] Add more commands
