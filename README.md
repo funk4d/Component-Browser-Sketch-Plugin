@@ -71,6 +71,7 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 ## Support
 
 If Component Browser saves you time, you can support its development on Ko-fi:
+
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/X0Z520U88Y)
 
 ## Credits
