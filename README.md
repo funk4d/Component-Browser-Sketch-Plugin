@@ -68,6 +68,12 @@ When you have layers selected, press **`Shift + Enter`** to replace them with th
 - [ ] Explore menu command introspection/execution (File, Edit, Window, Help, Plugins)
 - [ ] Add more commands
 
+## Support
+
+If Component Browser saves you time, you can support its development on Ko-fi:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/dmytroshevchuk)
+
 ## Credits
 
 Created by [Dmytro Shevchuk](https://github.com/funk4d)
