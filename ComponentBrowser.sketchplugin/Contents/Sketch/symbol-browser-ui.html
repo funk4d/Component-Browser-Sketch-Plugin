@@ -937,6 +937,7 @@
     let filteredSymbols = [];
     let selectedIndex = -1;
     let isLoadingSymbols = false;
+    let isBrowserActive = true;
     let searchTouched = false;
     let liveSearchQuery = '';
     
@@ -1209,10 +1210,7 @@
     const PREVIEW_DISPATCH_DELAY_MS = 8;
     const PREVIEW_REQUEST_TIMEOUT_MS = 4000;
     const MAX_PREVIEW_RETRIES = 4;
-    const BACKGROUND_PREVIEW_BATCH_SIZE = 3;
-    const BACKGROUND_PREVIEW_INTERVAL_MS = 900;
     let previewDispatchTimer = null;
-    let previewBackgroundInterval = null;
 
     // Virtualized list rendering: keep only ~visible items in the DOM. With
     // 5000+ symbols a full render takes seconds because WebKit lays out every
@@ -1260,13 +1258,6 @@
       }
     };
     
-    function stopBackgroundPreviewMonitor() {
-      if (previewBackgroundInterval) {
-        clearInterval(previewBackgroundInterval);
-        previewBackgroundInterval = null;
-      }
-    }
-
     function resetStuckPreviewRequest(symbolId) {
       if (!requestedPreviews.has(symbolId)) {
         return false;
@@ -1307,13 +1298,13 @@
     }
 
     function sendPreviewRequest(symbolId, priority) {
-      if (!symbolId) return;
+      if (!isBrowserActive || !symbolId) return;
       markPreviewRequestStarted(symbolId);
       alert((priority ? 'get-preview-priority:' : 'get-preview:') + symbolId);
     }
 
     function dispatchNextPreviewRequest() {
-      if (previewDispatchTimer || previewDispatchQueue.length === 0) {
+      if (!isBrowserActive || previewDispatchTimer || previewDispatchQueue.length === 0) {
         return;
       }
 
@@ -1328,6 +1319,7 @@
     }
 
     function enqueuePreviewRequest(symbolId, options) {
+      if (!isBrowserActive) return false;
       const requestOptions = options || {};
       const priority = requestOptions.priority === true;
       const allowRetry = requestOptions.allowRetry === true;
@@ -1367,72 +1359,8 @@
       enqueuePreviewRequest(selectedSymbol.id, { priority: true, allowRetry: true });
     }
 
-    function requestBackgroundPreviews() {
-      if (isLoadingSymbols || allSymbols.length === 0) return;
-
-      let requestedCount = 0;
-      for (let i = 0; i < allSymbols.length; i++) {
-        const symbol = allSymbols[i];
-        if (!symbol || symbol.preview) {
-          continue;
-        }
-
-        const didQueue = enqueuePreviewRequest(symbol.id, { allowRetry: true });
-        if (didQueue) {
-          requestedCount += 1;
-          if (requestedCount >= BACKGROUND_PREVIEW_BATCH_SIZE) {
-            break;
-          }
-        }
-      }
-    }
-
-    function hasRemainingPreviewWork() {
-      if (isLoadingSymbols) {
-        return false;
-      }
-
-      if (queuedPreviews.size > 0 || previewDispatchQueue.length > 0) {
-        return true;
-      }
-
-      return allSymbols.some((symbol) => {
-        if (!symbol || symbol.preview) {
-          return false;
-        }
-
-        if (!requestedPreviews.has(symbol.id)) {
-          return true;
-        }
-
-        const startedAt = previewRequestTimestamps.get(symbol.id);
-        const retryCount = previewRetryCounts.get(symbol.id) || 0;
-        return !!startedAt
-          && (Date.now() - startedAt) >= PREVIEW_REQUEST_TIMEOUT_MS
-          && retryCount < MAX_PREVIEW_RETRIES;
-      });
-    }
-
-    function startBackgroundPreviewMonitor() {
-      stopBackgroundPreviewMonitor();
-
-      previewBackgroundInterval = setInterval(() => {
-        if (allSymbols.length === 0) {
-          return;
-        }
-
-        requestPriorityPreviewForSelectedSymbol();
-        requestPreviewsForVisibleItems();
-        requestBackgroundPreviews();
-
-        if (!hasRemainingPreviewWork()) {
-          stopBackgroundPreviewMonitor();
-        }
-      }, BACKGROUND_PREVIEW_INTERVAL_MS);
-    }
-    
     function requestPreviewsForVisibleItems() {
-      if (isLoadingSymbols || !listContainer || filteredSymbols.length === 0) return;
+      if (!isBrowserActive || isLoadingSymbols || !listContainer || filteredSymbols.length === 0) return;
 
       requestPriorityPreviewForSelectedSymbol();
 
@@ -1445,12 +1373,28 @@
         enqueuePreviewRequest(symbol.id, { allowRetry: true });
       }
     }
+
+    window.setBrowserActive = function(active) {
+      isBrowserActive = !!active;
+
+      if (!isBrowserActive) {
+        if (previewDispatchTimer) {
+          clearTimeout(previewDispatchTimer);
+          previewDispatchTimer = null;
+        }
+        previewDispatchQueue.length = 0;
+        queuedPreviews.clear();
+        requestedPreviews.clear();
+        previewRequestTimestamps.clear();
+        previewRetryCounts.clear();
+        return;
+      }
+
+      requestAnimationFrame(() => requestPreviewsForVisibleItems());
+    };
     
     window.setLoading = function(loading) {
       isLoadingSymbols = !!loading;
-      if (loading) {
-        stopBackgroundPreviewMonitor();
-      }
       if (loadingEl) {
         loadingEl.style.display = loading ? 'flex' : 'none';
       }
@@ -1513,7 +1457,6 @@
         clearTimeout(previewDispatchTimer);
         previewDispatchTimer = null;
       }
-      stopBackgroundPreviewMonitor();
       allSymbols.forEach((symbol) => {
         if (symbol && symbol.preview) {
           loadedPreviews.add(symbol.id);
@@ -1562,7 +1505,7 @@
         window.focusSearchInput('smart');
       }
 
-      startBackgroundPreviewMonitor();
+      requestPreviewsForVisibleItems();
     };
 
     function isDarkThemeEnabled() {

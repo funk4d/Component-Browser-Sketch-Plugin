@@ -784,6 +784,12 @@ function scheduleCrawlerTick(delayMs) {
 
 function tickCrawler() {
   if (!crawlerState.enabled) return;
+  // Preview generation uses synchronous Sketch APIs. Never run it while the
+  // browser is hidden, otherwise editing the document can stall on crawler work.
+  if (!isBrowserVisible()) {
+    scheduleCrawlerTick(CRAWLER_TICK_BUSY_MS);
+    return;
+  }
   // Heartbeat keeps the lock alive while we're working.
   try {
     NSThread.mainThread().threadDictionary()
@@ -1583,6 +1589,8 @@ function hideBrowserWindow(browserState) {
   setBrowserVisibility(false);
   clearQueuedPreviewRequestsForWebView(browserState.webView);
   cancelLibraryRefsWarmup();
+  evaluateWebScriptSafely(browserState.webView,
+    'if (window.setBrowserActive) { window.setBrowserActive(false); }');
 
   const webViewWindow = browserState.webViewWindow || getThreadDictionaryObject(WINDOW_IDENTIFIER);
   if (webViewWindow) {
@@ -1824,6 +1832,8 @@ function onRun(context) {
         existingWindow.makeFirstResponder(webView);
       } catch (e) {}
       focusBrowserSearch(webView, 'select-existing');
+      evaluateWebScriptSafely(webView,
+        'if (window.setBrowserActive) { window.setBrowserActive(true); }');
       evaluateWebScriptSafely(webView,
         "window.applyUpdateNotice && window.applyUpdateNotice("
         + JSON.stringify(UPDATE_NOTICE_VERSION) + ","
