@@ -29,6 +29,7 @@ Click the logo to open Settings and change the launch shortcut or appearance. Dr
 | Tab / Shift + Tab | Next / previous source |
 | Enter | Insert the selected component |
 | Shift + Enter | Replace selected layers |
+| Alt + Enter | Jump to selected component |
 | Option + Enter | Open the component in its source document |
 | Esc | Close the browser |
 
