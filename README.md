@@ -25,6 +25,7 @@ Click the logo to open Settings and change the launch shortcut or appearance. Dr
 
 | Key | Action |
 | --- | --- |
+| Shift + ⌘ + ; | Launch Component Browser |
 | ↑ / ↓ | Select a component |
 | Tab / Shift + Tab | Next / previous source |
 | Enter | Insert the selected component |
