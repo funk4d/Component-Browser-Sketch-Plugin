@@ -14,7 +14,19 @@
       "handler": "onRunSettings"
     },
     {
-      "identifier": "component-browser-agent",
+      "identifier": "component-count-events-stable",
+      "script": "component-count-events.js",
+      "handlers": {
+        "onDocumentChanged": "onDocumentChanged",
+        "actions": {
+          "OpenDocument": "onDocumentLifecycle",
+          "DocumentSaved": "onDocumentLifecycle",
+          "CloseDocument": "onDocumentLifecycle"
+        }
+      }
+    },
+    {
+      "identifier": "component-browser-agent-stable",
       "script": "symbol-browser.js",
       "handlers": {
         "actions": {
@@ -26,9 +38,9 @@
   ],
   "name": "🧭 Component Browser",
   "identifier": "com.funkyplugins.componentbrowser",
-  "version": "1.4.1",
+  "version": "2.0",
   "appcast": "https://raw.githubusercontent.com/funk4d/Component-Browser-Sketch-Plugin/main/appcast.json",
-  "description": "Browse and insert Symbols/Components",
+  "description": "Browse and insert Components",
   "author": "Dmytro Shevchuk",
   "icon": "icon.png",
   "compatibleVersion": 3,

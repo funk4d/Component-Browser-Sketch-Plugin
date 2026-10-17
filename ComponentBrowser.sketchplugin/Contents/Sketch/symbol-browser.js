@@ -86,38 +86,51 @@ var MochaJSDelegate = function(selectorHandlerDict){
 const sketch = require('sketch');
 const UI = require('sketch/ui');
 const Settings = require('sketch/settings');
-const PREVIEW_CACHE_KEY = "com.funkyplugins.componentbrowser.previewCache.v2";
+const PREVIEW_MEMORY_CACHE_LIMIT = 4096;
 // v2: bumped because v1 entries were built by a scan path that mis-classified
 // local symbols whose names matched a library entry (e.g. local "Cursors/default"
 // when Object Kit also has one) — they got tagged as library imports and
 // disappeared from the picker. Bumping forces a one-time fresh scan with the
 // isForeign-aware classifier.
 const SYMBOLS_CACHE_KEY = "com.funkyplugins.componentbrowser.symbolsCache.v2";
-const LIBRARIES_CACHE_KEY = "com.funkyplugins.componentbrowser.librariesCache.v1";
-const CUSTOM_HOTKEY_KEY = "com.funkyplugins.componentbrowser.customHotkey.v1";
+// v2 forces one clean scan after switching to Sketch 2026.2+'s document-aware
+// library enumeration. v1 could permanently preserve empty lists from the
+// old global-only API.
+const LIBRARIES_CACHE_KEY = "com.funkyplugins.componentbrowser.librariesCache.v2";
+const BROWSER_PREFERENCES_KEY = "com.funkyplugins.componentbrowser.stable.browserPreferences.v1";
+const HOTKEY_DELEGATE_REVISION_KEY = "com.funkyplugins.componentbrowser.stable.hotkeyDelegateRevision";
+const HOTKEY_DELEGATE_REVISION = "preview-cache-2";
+const CUSTOM_HOTKEY_KEY = "com.funkyplugins.componentbrowser.stable.customHotkey.v1";
+const LEGACY_CUSTOM_HOTKEY_KEY = "com.funkyplugins.componentbrowser.customHotkey.v1";
 const UI_STATE_CACHE_KEY = "com.funkyplugins.componentbrowser.uiStateCache.v1";
 const UPDATE_NOTICE_DISMISSED_VERSION_KEY = "com.funkyplugins.componentbrowser.updateNoticeDismissedVersion";
-const UPDATE_NOTICE_VERSION = "1.4.0";
+const UPDATE_NOTICE_LAST_VERSION_KEY = "com.funkyplugins.componentbrowser.updateNoticeLastVersion";
+const UPDATE_NOTICE_PENDING_VERSION_KEY = "com.funkyplugins.componentbrowser.updateNoticePendingVersion";
+const UPDATE_NOTICE_VERSION = "2.0";
 const PREVIEW_DISK_INDEX_KEY = "com.funkyplugins.componentbrowser.previewDiskIndex.v1";
 const PREVIEW_DISK_DIR_NAME = "previews-v1";
-const PREVIEW_RENDER_SIZE = 64;
-const PREVIEW_QUEUE_DELAY_MS = 8;
+const PREVIEW_RENDER_SIZE = 128;
+const PREVIEW_CACHE_QUALITY_TAG = "128px-v1";
+const PREVIEW_QUEUE_DELAY_MS = 90;
 const SYMBOL_SCAN_BATCH_SIZE = 600;
 const SYMBOL_SCAN_LIBRARY_BATCH_SIZE = 4;
 const RESPONSIVE_SYMBOL_SCAN_BATCH_SIZE = 320;
 const RESPONSIVE_SYMBOL_SCAN_LIBRARY_BATCH_SIZE = 1;
 const RESPONSIVE_SCAN_START_DELAY_MS = 16;
+const INITIAL_BROWSER_WORK_DELAY_MS = 520;
 const DOCUMENT_WATCH_INTERVAL_MS = 450;
 const DEBUG_VERBOSE_SYMBOL_SCAN_LOGS = false;
 const DEBUG_VERBOSE_PREVIEW_LOGS = false;
-const WINDOW_IDENTIFIER = "com.funkyplugins.componentbrowser.window";
-const WEBVIEW_IDENTIFIER = "com.funkyplugins.componentbrowser.webView";
-const DELEGATE_IDENTIFIER = "com.funkyplugins.componentbrowser.delegate";
-const LAST_DOC_ID_KEY = "com.funkyplugins.componentbrowser.lastDocId";
-const WINDOW_VISIBLE_KEY = "com.funkyplugins.componentbrowser.visible";
-const DOC_LOCAL_COUNT_KEY = "com.funkyplugins.componentbrowser.localSymbolCount";
-const DOC_LIBRARY_COUNT_KEY = "com.funkyplugins.componentbrowser.enabledLibraryCount";
-const DOC_LIBRARY_SIGNATURE_KEY = "com.funkyplugins.componentbrowser.enabledLibrarySignature";
+const WINDOW_IDENTIFIER = "com.funkyplugins.componentbrowser.stable.liquid.window";
+const WEBVIEW_IDENTIFIER = "com.funkyplugins.componentbrowser.stable.liquid.webView";
+const DELEGATE_IDENTIFIER = "com.funkyplugins.componentbrowser.stable.liquid.delegate";
+const LAST_DOC_ID_KEY = "com.funkyplugins.componentbrowser.stable.liquid.lastDocId";
+const WINDOW_VISIBLE_KEY = "com.funkyplugins.componentbrowser.stable.liquid.visible";
+const DOC_LOCAL_COUNT_KEY = "com.funkyplugins.componentbrowser.stable.liquid.localSymbolCount";
+const DOC_LIBRARY_COUNT_KEY = "com.funkyplugins.componentbrowser.stable.liquid.enabledLibraryCount";
+const DOC_LIBRARY_SIGNATURE_KEY = "com.funkyplugins.componentbrowser.stable.liquid.enabledLibrarySignature";
+const HOTKEY_AGENT_INSTANCE_KEY = "com.funkyplugins.componentbrowser.stable.hotkeyAgent";
+const HOTKEY_AGENT_DELEGATE_KEY = "com.funkyplugins.componentbrowser.stable.hotkeyDelegate";
 
 const symbolLookupCache = {
   docId: null,
@@ -127,32 +140,17 @@ const symbolLookupCache = {
   // expose a working libraryID getter on the JS wrapper, so we record it
   // ourselves at scan time. Without this the disk-cache versionTag for library
   // symbols comes out empty, and writeDiskPreview silently skips the save —
-  // that's why on-demand previews stopped accumulating in the previews-v1 dir.
-  libraryIdById: {}
+  // that's why on-demand previews stopped accumulating on disk.
+  libraryIdById: {},
+  libraryRefsLoadedById: {}
 };
-const importPreviewFallbackTried = {};
+const previewVersionTagBySymbol = Object.create(null);
+const localPreviewVersionMemo = new Map();
+const pendingForegroundPreviewIDs = new Set();
+let previewQueueBuildToken = 0;
 
-// Tracks in-flight background ref warmup (see startLibraryRefsWarmup). Used
-// to dedupe re-entrant calls and to cancel when the browser closes.
-const refWarmupState = {
-  inProgress: false,
-  cancelToken: 0
-};
-
-// Timestamp of the most recent on-demand preview-request from the WebView.
-// The background crawler reads this to yield CPU when foreground work is
-// active. Set in createBrowserWindow's preview-request handler.
-let _lastForegroundPreviewAt = 0;
-const FOREGROUND_QUIET_MS = 1500;
-
-// L1 background verify: chunked scan that runs ~1.5s after a plugin open
-// (warm or cold) to catch in-memory library symbol renames. Local-symbol
-// renames are detected separately via a cheap fingerprint compare on warm
-// reopen, so this scan only has to chase the library case. Throttled to
-// once per 30s so frequent reopens don't churn through library APIs.
-let _lastL1VerifyAt = 0;
-const L1_VERIFY_DELAY_MS = 1500;
-const L1_VERIFY_MIN_INTERVAL_MS = 30000;
+// Keep the live preview cache bounded. Rendering is delegated to PreviewAgent.
+const previewMemoryCache = new Map();
 
 let runtimeBrowserState = null;
 
@@ -160,6 +158,15 @@ let runtimeBrowserState = null;
 // delegate keeps them alive across COScript GC.
 let hotkeyAgent = null;
 let hotkeyDelegate = null;
+let previewAgent = null;
+let previewAgentResultsTimer = null;
+let startupPreviewPrewarmTimer = null;
+let startupPreviewPrewarmToken = 0;
+let componentCountAgentTimer = null;
+const COMPONENT_COUNT_AGENT_KEY = 'com.funkyplugins.componentbrowser.stable.countAgent';
+const COMPONENT_COUNT_DIRTY_KEY = 'com.funkyplugins.componentbrowser.stable.countDirty';
+const STARTUP_PREVIEW_PREWARM_MAX_RETRIES = 8;
+const STARTUP_PREVIEW_PREWARM_BATCH_SIZE = 128;
 let hotkeyContext = null; // last context (for scriptURL)
 
 // When set to 'settings', the next plugin open enters settings mode directly
@@ -172,12 +179,17 @@ const CARBON_SHIFT_KEY  = 1 << 9;   // 512
 const CARBON_OPTION_KEY = 1 << 11;  // 2048
 const CARBON_CONTROL_KEY = 1 << 12; // 4096
 
-// Default binding if the user hasn't recorded one yet. 41 = ';'. Cmd+;.
+// Default launch shortcut: Cmd+; (key code 41).
 const DEFAULT_HOTKEY = { keyCode: 41, modifiers: CARBON_CMD_KEY };
 
 function getStoredHotkey() {
   try {
-    const raw = Settings.settingForKey(CUSTOM_HOTKEY_KEY);
+    let raw = Settings.settingForKey(CUSTOM_HOTKEY_KEY);
+    if (!raw) {
+      // Preserve shortcuts saved before Stable received its own preference key.
+      raw = Settings.settingForKey(LEGACY_CUSTOM_HOTKEY_KEY);
+      if (raw) Settings.setSettingForKey(CUSTOM_HOTKEY_KEY, raw);
+    }
     if (raw && typeof raw === 'object' && Number.isFinite(Number(raw.keyCode)) && Number.isFinite(Number(raw.modifiers))) {
       return { keyCode: Number(raw.keyCode), modifiers: Number(raw.modifiers) };
     }
@@ -193,11 +205,41 @@ function storeHotkey(hk) {
   }
 }
 
+function isNewerPluginVersion(current, previous) {
+  const left = String(current).split('.').map(Number);
+  const right = String(previous).split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const difference = (left[i] || 0) - (right[i] || 0);
+    if (difference) return difference > 0;
+  }
+  return false;
+}
+
+function prepareUpdateNotice() {
+  const previous = String(Settings.settingForKey(UPDATE_NOTICE_LAST_VERSION_KEY) || '');
+  if (previous === UPDATE_NOTICE_VERSION) return;
+  const dismissed = String(Settings.settingForKey(UPDATE_NOTICE_DISMISSED_VERSION_KEY) || '');
+  // Versions before 2.0 tracked dismissal but not installation. Existing
+  // preferences/cache provide the one-time migration when no dismissal exists.
+  const legacyInstall = !previous && (dismissed
+    || Settings.settingForKey(BROWSER_PREFERENCES_KEY)
+    || Settings.settingForKey(CUSTOM_HOTKEY_KEY)
+    || Settings.settingForKey(LEGACY_CUSTOM_HOTKEY_KEY)
+    || Settings.settingForKey(SYMBOLS_CACHE_KEY));
+  const upgraded = previous ? isNewerPluginVersion(UPDATE_NOTICE_VERSION, previous) : !!legacyInstall;
+  Settings.setSettingForKey(UPDATE_NOTICE_PENDING_VERSION_KEY,
+    upgraded && dismissed !== UPDATE_NOTICE_VERSION ? UPDATE_NOTICE_VERSION : null);
+  Settings.setSettingForKey(UPDATE_NOTICE_LAST_VERSION_KEY, UPDATE_NOTICE_VERSION);
+}
+
 function shouldShowUpdateNotice() {
   try {
-    return String(Settings.settingForKey(UPDATE_NOTICE_DISMISSED_VERSION_KEY) || '') !== UPDATE_NOTICE_VERSION;
+    prepareUpdateNotice();
+    return String(Settings.settingForKey(UPDATE_NOTICE_PENDING_VERSION_KEY) || '') === UPDATE_NOTICE_VERSION
+      && String(Settings.settingForKey(UPDATE_NOTICE_DISMISSED_VERSION_KEY) || '') !== UPDATE_NOTICE_VERSION;
   } catch (e) {
-    return true;
+    log('[UpdateNotice] version check failed: ' + e);
+    return false;
   }
 }
 
@@ -205,17 +247,48 @@ function dismissUpdateNotice(version) {
   if (String(version || '') !== UPDATE_NOTICE_VERSION) return;
   try {
     Settings.setSettingForKey(UPDATE_NOTICE_DISMISSED_VERSION_KEY, UPDATE_NOTICE_VERSION);
+    Settings.setSettingForKey(UPDATE_NOTICE_PENDING_VERSION_KEY, null);
   } catch (e) {
     log("[UpdateNotice] dismiss failed: " + e);
   }
 }
 
 function reRegisterHotkey(hk) {
+  hotkeyAgent = hotkeyAgent || getThreadDictionaryObject(HOTKEY_AGENT_INSTANCE_KEY);
+  hotkeyDelegate = hotkeyDelegate || getThreadDictionaryObject(HOTKEY_AGENT_DELEGATE_KEY);
   if (!hotkeyAgent) return false;
   try { hotkeyAgent.unregister(); } catch (e) {}
   const ok = hotkeyAgent.registerHotkeyWithKeyCode_modifiers_(hk.keyCode, hk.modifiers);
   log("[HotkeyAgent] re-register keyCode=" + hk.keyCode + " modifiers=" + hk.modifiers + " → " + (ok ? "YES" : "NO"));
   return !!ok;
+}
+
+function showHotkeyRecordingState(jsCall) {
+  const webView = getThreadDictionaryObject(WEBVIEW_IDENTIFIER);
+  if (webView) evaluateWebScriptSafely(webView, jsCall);
+}
+
+function handleRecordedHotkey(keyCode, modifiers) {
+  const requested = { keyCode: Number(keyCode), modifiers: Number(modifiers) };
+  if (!Number.isFinite(requested.keyCode) || !Number.isFinite(requested.modifiers)) return;
+
+  if (requested.modifiers === 0) {
+    showHotkeyRecordingState("window.hotkeyRecordingNeedsModifier && window.hotkeyRecordingNeedsModifier();");
+    return;
+  }
+
+  const previous = getStoredHotkey();
+  if (hotkeyAgent && hotkeyAgent.endRecording) hotkeyAgent.endRecording();
+  const registered = reRegisterHotkey(requested);
+  if (registered) {
+    storeHotkey(requested);
+    showHotkeyRecordingState("window.finishHotkeyRecording && window.finishHotkeyRecording(" + requested.keyCode + "," + requested.modifiers + ",true);");
+    log("[HotkeyAgent] shortcut saved keyCode=" + requested.keyCode + " modifiers=" + requested.modifiers);
+  } else {
+    reRegisterHotkey(previous);
+    showHotkeyRecordingState("window.finishHotkeyRecording && window.finishHotkeyRecording(" + previous.keyCode + "," + previous.modifiers + ",false);");
+    log("[HotkeyAgent] shortcut rejected; registration failed keyCode=" + requested.keyCode + " modifiers=" + requested.modifiers);
+  }
 }
 
 function loadHotkeyAgentFramework(scriptFolderURL) {
@@ -234,9 +307,9 @@ function loadHotkeyAgentFramework(scriptFolderURL) {
       log("[HotkeyAgent] bundle.load() returned NO (path=" + fwPath + ")");
       return null;
     }
-    const klass = NSClassFromString("CBHotkeyAgent");
+    const klass = NSClassFromString("CBStableHotkeyAgent");
     if (!klass) {
-      log("[HotkeyAgent] CBHotkeyAgent class missing after load");
+      log("[HotkeyAgent] CBStableHotkeyAgent class missing after load");
       return null;
     }
     const agent = klass.sharedAgent();
@@ -249,18 +322,25 @@ function loadHotkeyAgentFramework(scriptFolderURL) {
 }
 
 function setupHotkeyAgent(context) {
-  if (hotkeyAgent) return true; // already set up this session
+  if (!hotkeyAgent) {
+    hotkeyAgent = getThreadDictionaryObject(HOTKEY_AGENT_INSTANCE_KEY);
+    hotkeyDelegate = getThreadDictionaryObject(HOTKEY_AGENT_DELEGATE_KEY);
+  }
+  if (hotkeyAgent && String(getThreadDictionaryObject(HOTKEY_DELEGATE_REVISION_KEY) || '') === HOTKEY_DELEGATE_REVISION) {
+    if (context) hotkeyContext = context;
+    return true;
+  }
   if (!context || !context.scriptURL) return false;
   const scriptFolderURL = context.scriptURL.URLByDeletingLastPathComponent();
 
-  const agent = loadHotkeyAgentFramework(scriptFolderURL);
+  const agent = hotkeyAgent || loadHotkeyAgentFramework(scriptFolderURL);
   if (!agent) return false;
 
   const delegate = new MochaJSDelegate({
     "hotkeyDidTrigger": function() {
       log("[HotkeyAgent] hotkeyDidTrigger");
       try {
-        // Defer to next runloop tick so we don't reenter the Carbon callback.
+        // Defer until after the local NSEvent monitor has returned.
         setTimeout(function() {
           try {
             // Reuse the same context that was passed to onStartup/onRun. onRun
@@ -274,6 +354,9 @@ function setupHotkeyAgent(context) {
       } catch (e) {
         log("[HotkeyAgent] trigger handler error: " + e);
       }
+    },
+    "hotkeyDidRecordKeyCode:modifiers:": function(keyCode, modifiers) {
+      handleRecordedHotkey(keyCode, modifiers);
     }
   });
 
@@ -284,37 +367,381 @@ function setupHotkeyAgent(context) {
 
   hotkeyAgent = agent;
   hotkeyDelegate = delegate;
+  setThreadDictionaryObject(HOTKEY_AGENT_INSTANCE_KEY, agent);
+  setThreadDictionaryObject(HOTKEY_AGENT_DELEGATE_KEY, delegate);
+  setThreadDictionaryObject(HOTKEY_DELEGATE_REVISION_KEY, HOTKEY_DELEGATE_REVISION);
 
-  // Keep COScript alive so the Carbon event handler can call into JS later.
+  // Keep COScript alive so the AppKit event monitor can call into JS later.
   try {
     if (COScript.currentCOScript()) COScript.currentCOScript().setShouldKeepAround(true);
   } catch (e) {}
+
+  startComponentCountAgent();
 
   return ok;
 }
 
 function teardownHotkeyAgent() {
+  hotkeyAgent = hotkeyAgent || getThreadDictionaryObject(HOTKEY_AGENT_INSTANCE_KEY);
+  hotkeyDelegate = hotkeyDelegate || getThreadDictionaryObject(HOTKEY_AGENT_DELEGATE_KEY);
   try {
     if (hotkeyAgent) {
+      if (hotkeyAgent.endRecording) hotkeyAgent.endRecording();
       hotkeyAgent.unregister();
       hotkeyAgent.setDelegate_(null);
     }
   } catch (e) {
     log("[HotkeyAgent] teardown error: " + e);
   }
+  try {
+    const threadDictionary = NSThread.mainThread().threadDictionary();
+    if (threadDictionary.removeObjectForKey) {
+      threadDictionary.removeObjectForKey(HOTKEY_AGENT_INSTANCE_KEY);
+      threadDictionary.removeObjectForKey(HOTKEY_AGENT_DELEGATE_KEY);
+    }
+  } catch (e) {}
   hotkeyAgent = null;
   hotkeyDelegate = null;
 }
 
+function loadPreviewAgentFramework(scriptFolderURL) {
+  try {
+    const fwURL = scriptFolderURL
+      .URLByDeletingLastPathComponent()
+      .URLByAppendingPathComponent("Resources")
+      .URLByAppendingPathComponent("PreviewAgent.framework");
+    const fwPath = fwURL.path();
+    const bundle = NSBundle.bundleWithPath_(fwPath);
+    if (!bundle) {
+      log("[PreviewAgent] framework bundle not found at " + fwPath);
+      return null;
+    }
+    if (!bundle.load()) {
+      log("[PreviewAgent] failed to load framework at " + fwPath);
+      return null;
+    }
+    const klass = NSClassFromString("CBStablePreviewAgent");
+    if (!klass) {
+      log("[PreviewAgent] CBStablePreviewAgent class missing after load");
+      return null;
+    }
+    const agent = klass.agent();
+    return agent;
+  } catch (e) {
+    log("[PreviewAgent] framework load exception: " + e);
+    return null;
+  }
+}
+
+function previewAgentDidRenderSymbol(symbolId, pngPath, versionTag) {
+  const id = String(symbolId || '');
+  const tag = String(versionTag || '');
+  if (!id || !tag) return;
+  if (previewVersionTagBySymbol[id] && previewVersionTagBySymbol[id] !== tag) return;
+  pendingForegroundPreviewIDs.delete(id);
+  try {
+    const expectedPath = getPreviewDiskFilePath(id);
+    if (!expectedPath || String(pngPath || '') !== expectedPath) {
+      log("[PreviewAgent] rejected unexpected cache path for " + id);
+      return;
+    }
+    const fm = NSFileManager.defaultManager();
+    if (!fm.fileExistsAtPath(expectedPath)) return;
+    // The worker has already written the PNG and its version sidecar atomically.
+    // Rewriting the entire legacy Settings index for each completed thumbnail
+    // serialized thousands of entries on Sketch's UI thread.
+
+    const state = runtimeBrowserState;
+    if (state && state.isVisible && !state.closed && state.webView) {
+      const preview = readDiskPreview(id, tag);
+      if (preview) {
+        setCachedPreview(id, preview);
+        sendPreviewToUI(state.webView, id, preview);
+      }
+    }
+  } catch (e) {
+    log("[PreviewAgent] cache registration failed for " + id + ": " + e);
+  }
+}
+
+function setupPreviewAgent(context) {
+  if (previewAgent) {
+    log("[PreviewAgent] setup skipped; already running");
+    return true;
+  }
+  if (!context || !context.scriptURL) {
+    log("[PreviewAgent] setup skipped; Sketch context has no scriptURL");
+    return false;
+  }
+  const scriptFolderURL = context.scriptURL.URLByDeletingLastPathComponent();
+  const agent = loadPreviewAgentFramework(scriptFolderURL);
+  if (!agent) return false;
+
+  try {
+    const cachePath = getPreviewDiskCacheRoot();
+    const appPath = String(NSBundle.mainBundle().bundlePath());
+    const sketchtoolPath = appPath + "/Contents/MacOS/sketchtool";
+    if (!cachePath || !NSFileManager.defaultManager().fileExistsAtPath(sketchtoolPath)) {
+      log("[PreviewAgent] unavailable cachePath=" + cachePath + " sketchtool=" + sketchtoolPath);
+      return false;
+    }
+
+    agent.setCacheDirectory_(cachePath);
+    agent.setSketchtoolPath_(sketchtoolPath);
+    agent.setRenderSize_(PREVIEW_RENDER_SIZE);
+    agent.setIntervalFastMs_slowMs_(60000, 60);
+    // Pull plain JSON from the native worker. Calling a Mocha dynamic delegate
+    // asynchronously from PreviewAgent caused recursive native-object unboxing.
+    agent.setDelegate_(null);
+    agent.start();
+    previewAgent = agent;
+    let completedSequence = 0;
+    const collectCompletedPreviews = function() {
+      try {
+        const completed = JSON.parse(String(agent.completedPreviewsJSONAfterSequence_(completedSequence)));
+        completed.forEach(function(item) {
+          completedSequence = Math.max(completedSequence, Number(item.sequence) || 0);
+          previewAgentDidRenderSymbol(item.symbolId, item.path, item.versionTag);
+        });
+      } catch (e) { log("[PreviewAgent] result collection failed: " + e); }
+      previewAgentResultsTimer = setTimeout(collectCompletedPreviews, isBrowserVisible() ? 120 : 2000);
+    };
+    previewAgentResultsTimer = setTimeout(collectCompletedPreviews, 120);
+    log("[PreviewAgent] started with sketchtool=" + sketchtoolPath);
+    return true;
+  } catch (e) {
+    log("[PreviewAgent] setup failed: " + e);
+    return false;
+  }
+}
+
+function setPreviewAgentBusy(isBusy) {
+  if (!isBusy) pendingForegroundPreviewIDs.clear();
+  if (!previewAgent) return;
+  try { previewAgent.setForegroundActive_(!!isBusy); }
+  catch (e) { log("[PreviewAgent] foreground update failed: " + e); }
+}
+
+function teardownPreviewAgent() {
+  if (previewAgentResultsTimer) clearTimeout(previewAgentResultsTimer);
+  previewAgentResultsTimer = null;
+  try {
+    if (previewAgent) {
+      previewAgent.stop();
+      previewAgent.setDelegate_(null);
+    }
+  } catch (e) {
+    log("[PreviewAgent] teardown error: " + e);
+  }
+  previewAgent = null;
+}
+
 function onStartup(context) {
   log("=== Component Browser onStartup ===");
+  shouldShowUpdateNotice();
   hotkeyContext = context;
   setupHotkeyAgent(context);
+  setupPreviewAgent(context);
+  scheduleStartupPreviewPrewarm(0);
 }
 
 function onShutdown(context) {
   log("=== Component Browser onShutdown ===");
+  cancelStartupPreviewPrewarm();
+  if (componentCountAgentTimer) clearTimeout(componentCountAgentTimer);
+  componentCountAgentTimer = null;
+  NSThread.mainThread().threadDictionary().removeObjectForKey_(COMPONENT_COUNT_AGENT_KEY);
+  teardownPreviewAgent();
   teardownHotkeyAgent();
+}
+
+function cancelStartupPreviewPrewarm() {
+  startupPreviewPrewarmToken++;
+  if (startupPreviewPrewarmTimer) {
+    clearTimeout(startupPreviewPrewarmTimer);
+    startupPreviewPrewarmTimer = null;
+  }
+}
+
+function scheduleStartupPreviewPrewarm(retry) {
+  if (!previewAgent || startupPreviewPrewarmTimer) return;
+  const retryCount = Math.max(0, Number(retry) || 0);
+  startupPreviewPrewarmTimer = setTimeout(function() {
+    startupPreviewPrewarmTimer = null;
+    if (!previewAgent || isBrowserVisible()) return;
+
+    const document = getActiveDocument();
+    if (!document) {
+      if (retryCount < STARTUP_PREVIEW_PREWARM_MAX_RETRIES) {
+        scheduleStartupPreviewPrewarm(retryCount + 1);
+      } else {
+        log("[PreviewAgent] startup prewarm skipped; no document opened");
+      }
+      return;
+    }
+
+    const documentId = getDocumentIdentifier(document);
+    if (!documentId) return;
+    const token = ++startupPreviewPrewarmToken;
+    const shouldContinue = function() {
+      if (token !== startupPreviewPrewarmToken || isBrowserVisible()) return false;
+      const activeDocument = getActiveDocument();
+      return !!activeDocument && getDocumentIdentifier(activeDocument) === documentId;
+    };
+
+    log("[PreviewAgent] startup prewarm scan started");
+    getSymbolsJsonAsync(document, function(symbolsJson, symbolCount) {
+      if (!shouldContinue()) return;
+      log("[PreviewAgent] startup prewarm scan found " + symbolCount + " components");
+      storeComponentCount(document, symbolCount, getDocumentContentSignature(document));
+      setTimeout(function() {
+        if (shouldContinue()) queuePreviewAgentFromSymbolsJson(symbolsJson, document);
+      }, 0);
+    }, shouldContinue, {
+      symbolBatchSize: STARTUP_PREVIEW_PREWARM_BATCH_SIZE,
+      libraryBatchSize: 1
+    });
+  }, retryCount === 0 ? 8000 : 15000);
+}
+
+// The resident hotkey context warms a tiny, separate count cache while the
+// browser is closed. No raster, DOM wrappers, previews or live library loads.
+// Document events only mark this work dirty; rapid edits are debounced.
+function getComponentCountCachePath() {
+  const root = getPreviewDiskCacheRoot();
+  return root ? root + '/component-counts-stable-v1.json' : null;
+}
+
+function readComponentCounts() {
+  try {
+    const path = getComponentCountCachePath();
+    const json = path && NSString.stringWithContentsOfFile_encoding_error_(path, NSUTF8StringEncoding, null);
+    return json ? JSON.parse(String(json)) : {};
+  } catch (e) { return {}; }
+}
+
+function storeComponentCount(document, count, signature) {
+  const id = getDocumentIdentifier(document);
+  if (!id || !Number.isFinite(count) || count < 0) return;
+  try {
+    const entries = readComponentCounts();
+    entries[id] = {
+      count: count,
+      localCount: signature.localSymbolCount,
+      librarySignature: signature.enabledLibrarySignature,
+      fingerprint: previewContentHash(getLocalSymbolsFingerprint(document)),
+      updatedAt: Date.now()
+    };
+    // Small and bounded even when many different documents are opened.
+    Object.keys(entries).sort(function(a, b) {
+      return Number(entries[b].updatedAt) - Number(entries[a].updatedAt);
+    }).slice(64).forEach(function(key) { delete entries[key]; });
+    const path = getComponentCountCachePath();
+    if (path) NSString.stringWithString_(JSON.stringify(entries))
+      .writeToFile_atomically_encoding_error_(path, true, NSUTF8StringEncoding, null);
+  } catch (e) { log('[ComponentCount] save failed: ' + e); }
+}
+
+function getReadyComponentCount(document) {
+  const entry = readComponentCounts()[getDocumentIdentifier(document)];
+  // Native NSArray.count is constant time. Reject a known changed document
+  // without scanning components or querying libraries before first paint.
+  if (!entry || !Number.isFinite(entry.count)
+    || entry.localCount !== getDocumentSymbolCount(document)) return null;
+  return entry.count;
+}
+
+function startComponentCountAgent() {
+  if (componentCountAgentTimer || getThreadDictionaryObject(COMPONENT_COUNT_AGENT_KEY)) return;
+  const owner = String(NSUUID.UUID().UUIDString());
+  setThreadDictionaryObject(COMPONENT_COUNT_AGENT_KEY, owner);
+  let lastDocumentId = null, lastDirty = '', lastChecked = 0, scanToken = 0;
+  let pendingMetadataChange = false;
+  const verifiedEmptyLibraries = new Set();
+
+  function tick() {
+    if (String(getThreadDictionaryObject(COMPONENT_COUNT_AGENT_KEY) || '') !== owner) return;
+    componentCountAgentTimer = setTimeout(tick, 500);
+    if (isBrowserVisible()) return;
+    const document = getActiveDocument();
+    const id = getDocumentIdentifier(document);
+    if (!document || !id) return;
+    const dirty = String(getThreadDictionaryObject(COMPONENT_COUNT_DIRTY_KEY) || '');
+    if (dirty && Date.now() - Number(dirty) < 600) return;
+    if (id === lastDocumentId && dirty === lastDirty && Date.now() - lastChecked < 15000) return;
+    lastDocumentId = id;
+    lastDirty = dirty;
+    lastChecked = Date.now();
+    const token = ++scanToken;
+    const shouldContinue = function() {
+      const active = getActiveDocument();
+      return token === scanToken && !isBrowserVisible()
+        && String(getThreadDictionaryObject(COMPONENT_COUNT_DIRTY_KEY) || '') === dirty
+        && active && getDocumentIdentifier(active) === id;
+    };
+    const signature = getDocumentContentSignature(document);
+    const fingerprint = previewContentHash(getLocalSymbolsFingerprint(document));
+    const entry = readComponentCounts()[id];
+    const libraries = getEnabledLibraries(document);
+    const refs = [];
+    let metadataChanged = pendingMetadataChange;
+    for (let i = 0; i < libraries.length; i++) {
+      const library = libraries[i];
+      let cached = getCachedLibrarySymbols(library);
+      const verificationKey = getLibraryCacheKey(library) + '|' + getLibraryVersionTag(library);
+      // Older cold-start scans could persist [] before a library was ready.
+      // Verify empty/missing metadata from its archive on the native worker.
+      if (!cached || (!cached.symbols.length && !verifiedEmptyLibraries.has(verificationKey))) {
+        const path = getLibraryFilePathForPreviewAgent(library);
+        if (!previewAgent || !path || typeof previewAgent.componentMetadataJSONForLibraryPath_version_ !== 'function') return;
+        const json = previewAgent.componentMetadataJSONForLibraryPath_version_(path, getLibraryVersionTag(library));
+        if (!json) { lastChecked = Date.now() - 14500; return; }
+        const rows = JSON.parse(String(json));
+        verifiedEmptyLibraries.add(verificationKey);
+        metadataChanged = metadataChanged || !cached || cached.symbols.length !== rows.length;
+        pendingMetadataChange = metadataChanged;
+        setCachedLibrarySymbols(library, rows);
+        cached = { symbols: rows };
+      }
+      refs.push(cached.symbols);
+    }
+    if (metadataChanged) {
+      const listCache = getOrCreateSymbolsCache();
+      delete listCache[id];
+      Settings.setSettingForKey(SYMBOLS_CACHE_KEY, listCache);
+    }
+    if (!metadataChanged && entry && entry.librarySignature === signature.enabledLibrarySignature
+      && entry.fingerprint === fingerprint) return;
+    const local = getDocumentSymbolMetadata(document);
+    const names = new Set(), ids = new Set();
+    let localIndex = 0, libraryIndex = 0, refIndex = 0, count = local.length;
+    function step() {
+      if (!shouldContinue()) { lastChecked = 0; return; }
+      const start = Date.now();
+      let processed = 0;
+      while (localIndex < local.length && processed++ < 256 && Date.now() - start < 4) {
+        const item = local[localIndex++];
+        ids.add(String(item.id));
+        names.add(item.name);
+      }
+      while (localIndex === local.length && libraryIndex < refs.length
+        && processed++ < 256 && Date.now() - start < 4) {
+        if (refIndex >= refs[libraryIndex].length) { libraryIndex++; refIndex = 0; continue; }
+        const item = refs[libraryIndex][refIndex++];
+        // Match the browser's exact local/library deduplication rules.
+        if (!ids.has(String(item.id)) && !names.has(item.name)) count++;
+      }
+      if (localIndex < local.length || libraryIndex < refs.length) {
+        setTimeout(step, 12);
+        return;
+      }
+      storeComponentCount(document, count, signature);
+      pendingMetadataChange = false;
+      log('[ComponentCount] ready: ' + count + ' for ' + id);
+    }
+    step();
+  }
+  componentCountAgentTimer = setTimeout(tick, 100);
 }
 
 // Menu command: opens the plugin and switches straight to the Settings view.
@@ -378,8 +805,40 @@ function setThreadDictionaryObject(key, value) {
   }
 }
 
-function getEnabledLibraries() {
-  return sketch.getLibraries().filter(function(lib) { return lib.enabled; });
+function getEnabledLibraries(document) {
+  const targetDocument = document || getActiveDocument();
+  let libraries = null;
+
+  // The default library query omits enabled, locally available team libraries
+  // in a Cloud document on Sketch 2026.3.1. Ask for the full registry, then
+  // apply the user-enabled and Sketch-valid filters ourselves.
+  try {
+    if (sketch.Library && typeof sketch.Library.getLibraries === 'function') {
+      libraries = targetDocument
+        ? sketch.Library.getLibraries(targetDocument, { includeUnavailable: true })
+        : sketch.Library.getLibraries({ includeUnavailable: true });
+    }
+  } catch (e) {
+    log("[Libraries] Library.getLibraries failed: " + e);
+  }
+  if (!libraries) {
+    try {
+      if (targetDocument && typeof targetDocument.getLibraries === 'function') {
+        libraries = targetDocument.getLibraries();
+      } else {
+        libraries = targetDocument ? sketch.getLibraries(targetDocument) : sketch.getLibraries();
+      }
+    } catch (e) {
+      log("[Libraries] sketch.getLibraries(document) failed: " + e);
+      try { libraries = sketch.getLibraries(); } catch (fallbackError) {
+        log("[Libraries] sketch.getLibraries failed: " + fallbackError);
+        libraries = [];
+      }
+    }
+  }
+
+  if (!Array.isArray(libraries)) libraries = [];
+  return libraries.filter(function(lib) { return lib && lib.enabled && lib.valid !== false; });
 }
 
 function getEnabledLibrarySignatureFromLibraries(libraries) {
@@ -426,42 +885,91 @@ function getDocumentIdentifier(document) {
   return uuidMatch ? uuidMatch[1] : docStr;
 }
 
+function getNativeDocumentSymbols(document) {
+  try {
+    const object = document.sketchObject;
+    const data = typeof object.documentData === 'function' ? object.documentData() : object;
+    return data && typeof data.allSymbols === 'function' ? data.allSymbols() : null;
+  } catch (e) { return null; }
+}
+
+let documentTurnSnapshot = null;
+function getDocumentTurnSnapshot(document) {
+  const id = getDocumentIdentifier(document);
+  if (!documentTurnSnapshot || documentTurnSnapshot.id !== id) {
+    const snapshot = { id: id, metadata: null, signature: null };
+    documentTurnSnapshot = snapshot;
+    setTimeout(function() {
+      if (documentTurnSnapshot === snapshot) documentTurnSnapshot = null;
+    }, 0);
+  }
+  return documentTurnSnapshot;
+}
+
+function getDocumentSymbolCount(document) {
+  const models = getNativeDocumentSymbols(document);
+  return models ? Number(models.count()) : document.getSymbols().length;
+}
+
+function getDocumentSymbolMetadata(document) {
+  const snapshot = getDocumentTurnSnapshot(document);
+  if (snapshot.metadata) return snapshot.metadata;
+  const models = getNativeDocumentSymbols(document);
+  if (!models) return (snapshot.metadata = document.getSymbols());
+  try {
+    const klass = NSClassFromString('CBStablePreviewAgent');
+    if (klass && typeof klass.componentSummaryJSONForModels_ === 'function') {
+      const json = klass.componentSummaryJSONForModels_(models);
+      if (json) {
+        const result = JSON.parse(String(json));
+        result.forEach(function(meta, index) {
+          Object.defineProperty(meta, 'sketchObject', {
+            get: function() { return models.objectAtIndex(index); }
+          });
+        });
+        return (snapshot.metadata = result);
+      }
+    }
+  } catch (e) { log('[Components] native summary unavailable: ' + e); }
+  const result = [];
+  for (let i = 0, count = Number(models.count()); i < count; i++) {
+    const model = models.objectAtIndex(i);
+    result.push({ id: String(model.objectID()), name: String(model.name()), sketchObject: model });
+  }
+  return (snapshot.metadata = result);
+}
+
+function createLazyLocalSymbolLookup(symbols) {
+  const lookup = {};
+  symbols.forEach(function(meta) {
+    Object.defineProperty(lookup, String(meta.id), {
+      enumerable: true, configurable: true,
+      get: function() {
+        const master = sketch.fromNative(meta.sketchObject || meta);
+        Object.defineProperty(lookup, String(meta.id), { value: master, enumerable: true, configurable: true, writable: true });
+        return master;
+      }
+    });
+  });
+  return lookup;
+}
+
 function invalidateSymbolLookupCache() {
   symbolLookupCache.docId = null;
   symbolLookupCache.localById = {};
   symbolLookupCache.libraryRefById = {};
   symbolLookupCache.libraryIdById = {};
+  symbolLookupCache.libraryRefsLoadedById = {};
 }
 
 function rebuildSymbolLookupCache(document) {
-  const localById = {};
-  const libraryRefById = {};
-  const libraryIdById = {};
-
-  const localSymbols = document.getSymbols();
-  localSymbols.forEach(function(symbolMaster) {
-    localById[symbolMaster.id] = symbolMaster;
-  });
-
-  const libraries = sketch.getLibraries();
-  const enabledLibraries = libraries.filter(function(lib) { return lib.enabled; });
-  enabledLibraries.forEach(function(library) {
-    try {
-      const libIdStr = String(library.id || '');
-      const refs = library.getImportableSymbolReferencesForDocument(document);
-      refs.forEach(function(ref) {
-        libraryRefById[ref.id] = ref;
-        libraryIdById[ref.id] = libIdStr;
-      });
-    } catch (e) {
-      log("Error building preview ref cache for " + library.name + ": " + e);
-    }
-  });
+  const localById = createLazyLocalSymbolLookup(getDocumentSymbolMetadata(document));
 
   symbolLookupCache.docId = getDocumentIdentifier(document);
   symbolLookupCache.localById = localById;
-  symbolLookupCache.libraryRefById = libraryRefById;
-  symbolLookupCache.libraryIdById = libraryIdById;
+  symbolLookupCache.libraryRefById = {};
+  symbolLookupCache.libraryIdById = {};
+  symbolLookupCache.libraryRefsLoadedById = {};
 }
 
 function ensureSymbolLookupCache(document) {
@@ -476,13 +984,48 @@ function ensureSymbolLookupCache(document) {
   }
 }
 
+function getEnabledLibraryById(libraryId, document) {
+  if (libraryId === null || libraryId === undefined || libraryId === '') return null;
+  const wantedId = String(libraryId);
+  const libraries = getEnabledLibraries(document);
+  for (let i = 0; i < libraries.length; i++) {
+    if (String(libraries[i].id || '') === wantedId) return libraries[i];
+  }
+  return null;
+}
+
+function ensureLibraryReferenceCache(document, libraryId) {
+  if (!document || libraryId === null || libraryId === undefined || libraryId === '') return null;
+  ensureSymbolLookupCache(document);
+  const wantedId = String(libraryId);
+  if (symbolLookupCache.libraryRefsLoadedById[wantedId]) return getEnabledLibraryById(wantedId, document);
+
+  const library = getEnabledLibraryById(wantedId, document);
+  if (!library) return null;
+
+  try {
+    const refs = library.getImportableSymbolReferencesForDocument(document) || [];
+    for (let i = 0; i < refs.length; i++) {
+      const ref = refs[i];
+      if (!ref || !ref.id) continue;
+      const id = String(ref.id);
+      symbolLookupCache.libraryRefById[id] = ref;
+      symbolLookupCache.libraryIdById[id] = wantedId;
+    }
+    symbolLookupCache.libraryRefsLoadedById[wantedId] = true;
+    return library;
+  } catch (e) {
+    log("[Preview] failed to load references for library " + wantedId + ": " + e);
+    return null;
+  }
+}
+
 // ============================================================
 // Persistent preview disk cache
 // ============================================================
-// PNG files are stored under ~/Library/Caches/<bundle>/previews-v1/<symbolId>.png.
-// An NSUserDefaults-backed index records each entry's versionTag so a stale
-// preview is detected and re-exported. The index is much smaller than the
-// PNGs themselves so persisting it cheaply on every write is fine.
+// PNGs live in ~/Library/Caches and are reused across Sketch launches while
+// the OS retains them. Version sidecars are written by the native worker;
+// the old Settings index is read only as a compatibility fallback.
 
 let _previewDiskCacheRootPath = null;
 
@@ -490,9 +1033,9 @@ function getPreviewDiskCacheRoot() {
   if (_previewDiskCacheRootPath) return _previewDiskCacheRootPath;
   try {
     const fm = NSFileManager.defaultManager();
-    const caches = fm.URLsForDirectory_inDomains(NSCachesDirectory, NSUserDomainMask);
-    if (!caches || caches.count() === 0) return null;
-    const root = caches.objectAtIndex(0)
+    const cacheDirectories = fm.URLsForDirectory_inDomains(NSCachesDirectory, NSUserDomainMask);
+    if (!cacheDirectories || cacheDirectories.count() === 0) return null;
+    const root = cacheDirectories.objectAtIndex(0)
       .URLByAppendingPathComponent("com.funkyplugins.componentbrowser")
       .URLByAppendingPathComponent(PREVIEW_DISK_DIR_NAME);
     fm.createDirectoryAtURL_withIntermediateDirectories_attributes_error(root, true, null, null);
@@ -504,12 +1047,31 @@ function getPreviewDiskCacheRoot() {
   }
 }
 
+function getSafePreviewFileName(symbolId) {
+  return String(symbolId || '').replace(/[^A-Za-z0-9_.-]/g, "_") + ".png";
+}
+
 function getPreviewDiskFilePath(symbolId) {
   const root = getPreviewDiskCacheRoot();
   if (!root || !symbolId) return null;
-  // Sketch symbol IDs are UUIDs but sanitize defensively in case of edge cases.
-  const safeName = String(symbolId).replace(/[^A-Za-z0-9_.-]/g, "_");
-  return root + "/" + safeName + ".png";
+  return root + "/" + getSafePreviewFileName(symbolId);
+}
+
+function getPreviewDiskVersionFilePath(symbolId) {
+  const pngPath = getPreviewDiskFilePath(symbolId);
+  return pngPath ? pngPath + ".version" : null;
+}
+
+function readPreviewDiskVersionTag(symbolId) {
+  const versionPath = getPreviewDiskVersionFilePath(symbolId);
+  if (!versionPath) return null;
+  try {
+    const data = NSData.dataWithContentsOfFile(versionPath);
+    if (!data || data.length() === 0) return null;
+    return String(NSString.alloc().initWithData_encoding(data, NSUTF8StringEncoding));
+  } catch (e) {
+    return null;
+  }
 }
 
 let _previewDiskIndexMemo = null;
@@ -521,20 +1083,43 @@ function getPreviewDiskIndex() {
   return _previewDiskIndexMemo;
 }
 
-function savePreviewDiskIndex() {
-  if (!_previewDiskIndexMemo) return;
+function hasValidDiskPreview(symbolId, expectedVersionTag) {
+  if (!symbolId || !expectedVersionTag) return false;
+  const path = getPreviewDiskFilePath(symbolId);
+  if (!path) return false;
   try {
-    Settings.setSettingForKey(PREVIEW_DISK_INDEX_KEY, _previewDiskIndexMemo);
-  } catch (e) {
-    log("[PreviewCache] index save failed: " + e);
+    const fm = NSFileManager.defaultManager();
+    if (!fm.fileExistsAtPath(path)) {
+      return false;
+    }
+    const wantedTag = getPreviewCacheVersionTag(expectedVersionTag);
+    const sidecarTag = readPreviewDiskVersionTag(symbolId);
+    if (sidecarTag !== null) return sidecarTag === wantedTag;
+    const entry = getPreviewDiskIndex()[String(symbolId)];
+    if (entry && String(entry.versionTag || '') === wantedTag) return true;
+  } catch (e) {}
+  return false;
+}
+
+function getPreviewCacheVersionTag(versionTag) {
+  return PREVIEW_CACHE_QUALITY_TAG + ":" + String(versionTag || '');
+}
+
+function previewContentHash(value) {
+  const text = String(value || '');
+  let first = 2166136261, second = 2654435769;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 2246822519);
   }
+  return text.length + '-' + (first >>> 0).toString(16) + '-' + (second >>> 0).toString(16);
 }
 
 // A version tag is whatever string changes when the symbol's rendered content
-// changes. Library symbols use their owning library's lastModifiedAt (already
-// tracked by the L2 cache). Local symbols try MSSymbolMaster.lastChangedAt
-// and fall back to a structural fingerprint so common edits invalidate too.
-function getSymbolVersionTag(symbolMaster, libraryRef, symbolId) {
+// changes. Library components use the library revision; local components use
+// a persistent checksum of their metadata, memoized by the live model revision.
+function getSymbolVersionTag(symbolMaster, libraryRef, symbolId, document) {
   // For library symbols, derive the owning library's version. We can't ask
   // the JS ref wrapper directly (no working libraryID accessor) — instead
   // look up the library id recorded at scan time in symbolLookupCache.
@@ -548,12 +1133,10 @@ function getSymbolVersionTag(symbolMaster, libraryRef, symbolId) {
         } catch (e) {}
       }
       if (libIdRaw) {
-        const libs = sketch.getLibraries();
-        for (let i = 0; i < libs.length; i++) {
-          if (String(libs[i].id) === String(libIdRaw)) {
-            const t = getLibraryVersionTag(libs[i]);
-            if (t) return "lib:" + t;
-          }
+        const library = getEnabledLibraryById(libIdRaw, document || getActiveDocument());
+        if (library) {
+          const t = getLibraryVersionTag(library);
+          if (t) return "lib:" + t;
         }
       }
     }
@@ -562,6 +1145,26 @@ function getSymbolVersionTag(symbolMaster, libraryRef, symbolId) {
   try {
     const native = symbolMaster ? (symbolMaster.sketchObject || symbolMaster) : null;
     if (!native) return "";
+    // Native immutable-object hashes identify a revision only within a process.
+    // Persist a checksum of JSON metadata instead; this does not rasterize the
+    // component, and memoization avoids serializing it again until it changes.
+    if (symbolMaster && !libraryRef) {
+      const key = String(getDocumentIdentifier(document) || '') + '|' + String(symbolId || symbolMaster.id || '');
+      let revision = '';
+      try { revision = String(symbolMaster._revision || native.immutableModelObject().hash()); } catch (e) {}
+      const memo = localPreviewVersionMemo.get(key);
+      if (revision && memo && memo.revision === revision) return memo.tag;
+      const json = sketch.export(sketch.fromNative(native), { formats: 'json', output: false });
+      const serialized = JSON.stringify(json);
+      const tag = 'local-json-v1:' + previewContentHash(serialized);
+      const references = [];
+      const pattern = /"symbolID"\s*:\s*"([^"]+)"/g;
+      let match;
+      while ((match = pattern.exec(serialized))) references.push(match[1]);
+      localPreviewVersionMemo.set(key, { revision: revision, tag: tag, references: references });
+      if (localPreviewVersionMemo.size > 4096) localPreviewVersionMemo.delete(localPreviewVersionMemo.keys().next().value);
+      return tag;
+    }
     if (typeof native.lastChangedAt === 'function') {
       const d = native.lastChangedAt();
       if (d && typeof d.timeIntervalSince1970 === 'function') {
@@ -588,316 +1191,53 @@ function getSymbolVersionTag(symbolMaster, libraryRef, symbolId) {
 
 function readDiskPreview(symbolId, expectedVersionTag) {
   if (!symbolId || !expectedVersionTag) return null;
-  const idx = getPreviewDiskIndex();
-  const entry = idx[symbolId];
-  if (!entry || String(entry.versionTag || '') !== String(expectedVersionTag)) return null;
   const filePath = getPreviewDiskFilePath(symbolId);
   if (!filePath) return null;
   try {
     const fm = NSFileManager.defaultManager();
     if (!fm.fileExistsAtPath(filePath)) {
-      // Index lies — file missing. Drop the entry so future writes succeed.
-      delete idx[symbolId];
-      savePreviewDiskIndex();
       return null;
     }
-    const data = NSData.dataWithContentsOfFile(filePath);
-    if (!data || data.length() === 0) return null;
-    return "data:image/png;base64," + data.base64EncodedStringWithOptions(0);
+    const wantedTag = getPreviewCacheVersionTag(expectedVersionTag);
+    const sidecarTag = readPreviewDiskVersionTag(symbolId);
+    if (sidecarTag !== null) {
+      if (sidecarTag !== wantedTag) return null;
+    } else {
+      const entry = getPreviewDiskIndex()[symbolId];
+      if (!entry || String(entry.versionTag || '') !== wantedTag) return null;
+    }
+    // Let WebKit read/decode the cached file asynchronously. Main-thread PNG
+    // reads, base64 encoding and large evaluateWebScript payloads caused pauses.
+    const url = String(NSURL.fileURLWithPath(filePath).absoluteString());
+    return url + '?v=' + encodeURIComponent(wantedTag);
   } catch (e) {
     log("[PreviewCache] read failed for " + symbolId + ": " + e);
     return null;
   }
 }
 
-function writeDiskPreview(symbolId, dataUrl, versionTag) {
-  if (!symbolId || !dataUrl || !versionTag) return false;
-  const prefix = 'data:image/png;base64,';
-  if (dataUrl.indexOf(prefix) !== 0) return false;
-  const filePath = getPreviewDiskFilePath(symbolId);
-  if (!filePath) return false;
-  try {
-    const b64 = dataUrl.substring(prefix.length);
-    const data = NSData.alloc().initWithBase64EncodedString_options(b64, 0);
-    if (!data) return false;
-    const ok = data.writeToFile_atomically(filePath, true);
-    if (!ok) return false;
-    const idx = getPreviewDiskIndex();
-    idx[symbolId] = { versionTag: String(versionTag), updatedAt: Date.now() };
-    savePreviewDiskIndex();
-    return true;
-  } catch (e) {
-    log("[PreviewCache] write failed for " + symbolId + ": " + e);
-    return false;
-  }
+// In-memory thumbnails are an LRU. Persistent PNGs are read lazily from disk;
+// copying thousands of base64 strings through Sketch settings on every render
+// made cache hits quadratic in library size.
+function getCachedPreview(symbolId) {
+  if (!symbolId) return null;
+  const key = String(symbolId);
+  if (!previewMemoryCache.has(key)) return null;
+  const value = previewMemoryCache.get(key);
+  previewMemoryCache.delete(key);
+  previewMemoryCache.set(key, value);
+  return value;
 }
 
-// ============================================================
-// Background preview crawler — Run-context flavour
-// ============================================================
-// Lives in the JS context of the Run command (createBrowserWindow). That
-// context has Sketch's library docs loaded — the same private-API render
-// path that on-demand previews use already works here. The crawler tick is
-// VERY conservative (2-3 seconds between renders) so Sketch's main thread
-// is never pressured. A cross-context lock kept in NSThread's main thread
-// dictionary makes sure repeated plugin opens don't spawn duplicate
-// crawlers; if the owning context dies, a stale heartbeat lets another Run
-// reclaim the lock.
-
-const CRAWLER_LOCK_KEY = "com.funkyplugins.componentbrowser.crawlerActive";
-const CRAWLER_HEARTBEAT_KEY = "com.funkyplugins.componentbrowser.crawlerHeartbeat";
-// Tick intervals — generatePreviewForSymbolSync can take 200ms-2s of main
-// thread time per symbol (it falls through to sketch.export() for symbols
-// the private API can't handle). At 3000ms idle that's ≤67% main thread
-// utilization, conservative enough to keep Sketch responsive.
-const CRAWLER_TICK_IDLE_MS = 3000;
-const CRAWLER_TICK_BUSY_MS = 8000;
-const CRAWLER_IDLE_RESCAN_MS = 60000;
-const CRAWLER_HEARTBEAT_TTL_MS = 30000;
-const CRAWLER_MAX_SKIP_PER_TICK = 100;
-
-const crawlerState = {
-  enabled: false,
-  queue: [],
-  cursor: 0,
-  lastScanAt: 0,
-  rendered: 0,
-  _tickId: 0
-};
-
-// Chunked async verify: iterate libraries one at a time on the main runloop
-// so each Sketch API call only blocks for ~100-300ms before yielding back to
-// the UI. Compare each library's live ref names against the cached list; if
-// any names changed, push the updated JSON to the UI directly (no second
-// full scan). This catches in-memory library renames without the 3-4s
-// freeze a synchronous full scan would cause.
-function scheduleL1VerifyRefresh(browserState) {
-  if (!browserState || browserState.closed) return;
-  const sinceLast = Date.now() - _lastL1VerifyAt;
-  if (sinceLast < L1_VERIFY_MIN_INTERVAL_MS) return;
-  _lastL1VerifyAt = Date.now();
-  setTimeout(function() {
-    runAsyncL1Verify(browserState);
-  }, L1_VERIFY_DELAY_MS);
-}
-
-function runAsyncL1Verify(browserState) {
-  if (!browserState || browserState.closed) return;
-  const document = browserState.document;
-  const webView = browserState.webView;
-  if (!document || !webView) return;
-
-  const cachedJson = getCachedSymbolsJson(document);
-  if (!cachedJson) return;
-
-  let cachedSymbols;
-  try { cachedSymbols = JSON.parse(cachedJson); } catch (e) { return; }
-
-  // Index cached symbols by id for fast comparison
-  const cachedById = {};
-  for (let i = 0; i < cachedSymbols.length; i++) {
-    cachedById[String(cachedSymbols[i].id)] = cachedSymbols[i];
+function setCachedPreview(symbolId, preview) {
+  if (!symbolId || !preview) return;
+  const key = String(symbolId);
+  if (previewMemoryCache.has(key)) previewMemoryCache.delete(key);
+  previewMemoryCache.set(key, String(preview));
+  while (previewMemoryCache.size > PREVIEW_MEMORY_CACHE_LIMIT) {
+    const oldestKey = previewMemoryCache.keys().next().value;
+    previewMemoryCache.delete(oldestKey);
   }
-
-  let libs;
-  try { libs = sketch.getLibraries().filter(function(l) { return l.enabled; }); }
-  catch (e) { return; }
-  if (libs.length === 0) return;
-
-  let libIdx = 0;
-  let nameUpdates = 0;
-
-  function processNextLib() {
-    if (!browserState || browserState.closed) return;
-    if (libIdx >= libs.length) {
-      if (nameUpdates > 0) {
-        log("[L1] verify: " + nameUpdates + " name change(s) detected — refreshing UI");
-        const updatedJson = JSON.stringify(cachedSymbols);
-        evaluateWebScriptSafely(webView, 'window.loadSymbols(' + updatedJson + ', null);');
-        // Persist so next plugin open shows the new names immediately.
-        try { setCachedSymbolsJson(document, updatedJson); } catch (e) {}
-      }
-      return;
-    }
-    const lib = libs[libIdx++];
-    try {
-      const refs = lib.getImportableSymbolReferencesForDocument(document);
-      for (let i = 0; i < refs.length; i++) {
-        const ref = refs[i];
-        const cached = cachedById[String(ref.id)];
-        if (cached) {
-          const liveName = String(ref.name);
-          if (cached.name !== liveName) {
-            cached.name = liveName;
-            nameUpdates++;
-          }
-        }
-      }
-    } catch (e) {}
-    // Yield to the main thread between libraries so the UI stays responsive
-    // even during this scan.
-    setTimeout(processNextLib, 80);
-  }
-
-  setTimeout(processNextLib, 0);
-}
-
-function maybeStartCrawler(context) {
-  if (crawlerState.enabled) return;
-  // Cross-context lock so multiple Run invocations don't all spawn crawlers.
-  let td = null;
-  try { td = NSThread.mainThread().threadDictionary(); } catch (e) {}
-  if (!td) return;
-
-  const existing = td.objectForKey(CRAWLER_LOCK_KEY);
-  if (existing) {
-    const heartbeatRaw = td.objectForKey(CRAWLER_HEARTBEAT_KEY);
-    const heartbeat = Number(String(heartbeatRaw || '0'));
-    if (Date.now() - heartbeat < CRAWLER_HEARTBEAT_TTL_MS) {
-      log("[PreviewCrawler] another context owns the lock — staying idle");
-      return;
-    }
-    log("[PreviewCrawler] stale lock detected (no heartbeat for "
-        + Math.round((Date.now() - heartbeat) / 1000) + "s) — reclaiming");
-  }
-  td.setObject_forKey_("1", CRAWLER_LOCK_KEY);
-  td.setObject_forKey_(String(Date.now()), CRAWLER_HEARTBEAT_KEY);
-  crawlerState.enabled = true;
-  log("[PreviewCrawler] started in Run context (tick "
-      + CRAWLER_TICK_IDLE_MS + "ms idle / " + CRAWLER_TICK_BUSY_MS + "ms busy)");
-  // Wait a few seconds before first tick so we don't compete with the cold
-  // plugin open.
-  scheduleCrawlerTick(5000);
-}
-
-function scheduleCrawlerTick(delayMs) {
-  if (!crawlerState.enabled) return;
-  const tickId = ++crawlerState._tickId;
-  setTimeout(function() {
-    if (!crawlerState.enabled || crawlerState._tickId !== tickId) return;
-    try { tickCrawler(); } catch (e) {
-      log("[PreviewCrawler] tick error: " + e);
-      scheduleCrawlerTick(CRAWLER_IDLE_RESCAN_MS);
-    }
-  }, delayMs);
-}
-
-function tickCrawler() {
-  if (!crawlerState.enabled) return;
-  // Preview generation uses synchronous Sketch APIs. Never run it while the
-  // browser is hidden, otherwise editing the document can stall on crawler work.
-  if (!isBrowserVisible()) {
-    scheduleCrawlerTick(CRAWLER_TICK_BUSY_MS);
-    return;
-  }
-  // Heartbeat keeps the lock alive while we're working.
-  try {
-    NSThread.mainThread().threadDictionary()
-      .setObject_forKey_(String(Date.now()), CRAWLER_HEARTBEAT_KEY);
-  } catch (e) {}
-
-  const foregroundActive = (Date.now() - _lastForegroundPreviewAt) < FOREGROUND_QUIET_MS;
-  const tickMs = foregroundActive ? CRAWLER_TICK_BUSY_MS : CRAWLER_TICK_IDLE_MS;
-
-  // Refill queue when exhausted.
-  if (crawlerState.cursor >= crawlerState.queue.length) {
-    if (Date.now() - crawlerState.lastScanAt < CRAWLER_IDLE_RESCAN_MS) {
-      scheduleCrawlerTick(CRAWLER_IDLE_RESCAN_MS);
-      return;
-    }
-    rebuildCrawlerQueue();
-    crawlerState.lastScanAt = Date.now();
-    if (crawlerState.queue.length === 0) {
-      scheduleCrawlerTick(CRAWLER_IDLE_RESCAN_MS);
-      return;
-    }
-  }
-
-  // Skip already-cached entries until we find a candidate or run out for
-  // this tick. The skip-cap keeps the tick predictably short even when the
-  // cache is mostly primed.
-  let skipped = 0;
-  while (skipped++ < CRAWLER_MAX_SKIP_PER_TICK
-         && crawlerState.cursor < crawlerState.queue.length) {
-    const item = crawlerState.queue[crawlerState.cursor++];
-    if (!item || !item.symbolId) continue;
-    // Cheap disk presence check — readDiskPreview also validates versionTag.
-    const filePath = getPreviewDiskFilePath(item.symbolId);
-    if (filePath) {
-      try {
-        if (NSFileManager.defaultManager().fileExistsAtPath(filePath)) continue;
-      } catch (e) {}
-    }
-    // Use the full on-demand pipeline (generatePreviewForSymbolSync) — same
-    // path the WebView's preview-request handler uses. It tries the private
-    // preview API, falls through to sketch.export(), and writes to the disk
-    // cache on success. The earlier version called only previewFromNativeObject
-    // (private API) which returns nil for most symbols, so nothing got
-    // written — that's why files stayed at 47.
-    let didRender = false;
-    try {
-      let document = null;
-      try { document = sketch.getSelectedDocument(); } catch (e) {}
-      if (document) {
-        const preview = generatePreviewForSymbolSync(item.symbolId, document);
-        if (preview) didRender = true; // generatePreviewForSymbolSync writes disk on success
-      }
-    } catch (e) {}
-    if (didRender) {
-      crawlerState.rendered++;
-      if (crawlerState.rendered <= 5 || crawlerState.rendered % 50 === 0) {
-        log("[PreviewCrawler] rendered " + crawlerState.rendered
-            + " (cursor=" + crawlerState.cursor + "/" + crawlerState.queue.length + ")");
-      }
-    }
-    scheduleCrawlerTick(tickMs);
-    return;
-  }
-  // No work found in this batch — try again soon to keep scanning.
-  scheduleCrawlerTick(tickMs);
-}
-
-function rebuildCrawlerQueue() {
-  const queue = [];
-  try {
-    let document = null;
-    try { document = sketch.getSelectedDocument(); } catch (e) {}
-    if (!document) {
-      crawlerState.queue = [];
-      crawlerState.cursor = 0;
-      return;
-    }
-    const libs = sketch.getLibraries();
-    for (let i = 0; i < libs.length; i++) {
-      const lib = libs[i];
-      if (!lib || !lib.enabled) continue;
-      const versionTag = getLibraryVersionTag(lib);
-      let refs;
-      try { refs = lib.getImportableSymbolReferencesForDocument(document); } catch (e) { continue; }
-      if (!refs) continue;
-      for (let j = 0; j < refs.length; j++) {
-        const ref = refs[j];
-        if (!ref || !ref.id) continue;
-        queue.push({
-          symbolId: String(ref.id),
-          libraryRef: ref,
-          libraryVersionTag: versionTag
-        });
-      }
-    }
-  } catch (e) {
-    log("[PreviewCrawler] rebuildQueue failed: " + e);
-  }
-  crawlerState.queue = queue;
-  crawlerState.cursor = 0;
-  if (queue.length > 0) {
-    log("[PreviewCrawler] queue rebuilt: " + queue.length + " library symbols");
-  }
-}
-
-function getOrCreatePreviewCache() {
-  const cache = Settings.sessionVariable(PREVIEW_CACHE_KEY);
-  return cache && typeof cache === 'object' && !Array.isArray(cache) ? Object.assign({}, cache) : {};
 }
 
 // Symbols cache is persistent (NSUserDefaults-backed via Settings.setSettingForKey)
@@ -948,10 +1288,8 @@ function stripPreviewsFromSymbolsJson(symbolsJson) {
 // LEAN — { id, name } per symbol — so a 5000-symbol library is ~150 KB on
 // disk, not megabytes.
 //
-// The actual MSShareableObjectReference objects are intentionally NOT cached
-// — they don't survive a Sketch restart and are needed live for preview
-// generation. After a cache hit they're warmed back into memory via
-// startLibraryRefsWarmup, scanned per-library in the background.
+// Live reference objects are loaded only for a component's owning library
+// when its thumbnail is requested.
 // Reading from NSUserDefaults is not free, especially for a multi-MB blob —
 // deserializing 10× per scan (once per library probe) adds up. Memoize for
 // a short window so the per-library reads within a single scan only hit
@@ -1005,17 +1343,13 @@ function getLibraryVersionTag(library) {
     }
   } catch (e) {}
   try {
-    const native = library.sketchObject || library;
-    if (native && typeof native.locationOnDisk === 'function') {
-      const url = native.locationOnDisk();
-      const path = url ? String(url.path()) : null;
-      if (path) {
-        const attrs = NSFileManager.defaultManager().attributesOfItemAtPath_error_(path, null);
-        if (attrs) {
-          const modDate = attrs.objectForKey("NSFileModificationDate");
-          if (modDate && typeof modDate.timeIntervalSince1970 === 'function') {
-            parts.push("f" + Math.floor(Number(modDate.timeIntervalSince1970()) * 1000));
-          }
+    const path = getLibraryFilePathForPreviewAgent(library);
+    if (path) {
+      const attrs = NSFileManager.defaultManager().attributesOfItemAtPath_error_(path, null);
+      if (attrs) {
+        const modDate = attrs.objectForKey("NSFileModificationDate");
+        if (modDate && typeof modDate.timeIntervalSince1970 === 'function') {
+          parts.push("f" + Math.floor(Number(modDate.timeIntervalSince1970()) * 1000));
         }
       }
     }
@@ -1042,6 +1376,244 @@ function getLibraryCacheKey(library) {
   const name = String(library.name || '');
   if (!id && !name) return null;
   return id + '|' + name;
+}
+
+function getLibraryFilePathForPreviewAgent(library) {
+  try {
+    // Library.getDocument() calls loadSynchronously() in Sketch's API. Reading
+    // a path must never open every enabled library on the main thread.
+    const native = library && library.sketchObject;
+    if (!native || typeof native.locationOnDisk !== 'function') return null;
+    const url = native.locationOnDisk();
+    if (!url || !url.isFileURL()) return null;
+    let path = String(url.path() || '');
+    try { path = decodeURIComponent(path); } catch (e) {}
+    if (!path || !/\.sketch$/i.test(path)) return null;
+    return NSFileManager.defaultManager().fileExistsAtPath(path) ? path : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getLibraryPreviewSources(library) {
+  try {
+    if (!library || typeof library.getDocument !== 'function') return null;
+    const libraryDocument = library.getDocument();
+    if (!libraryDocument || typeof libraryDocument.getSymbols !== 'function') return null;
+
+    const sourceIdsByName = Object.create(null);
+    const sourceIdsByComponentId = Object.create(null);
+    const sourceSymbols = libraryDocument.getSymbols();
+    for (let i = 0; i < sourceSymbols.length; i++) {
+      const source = sourceSymbols[i];
+      const name = String(source && source.name || '');
+      const id = String(source && source.id || '');
+      if (!name || !id) continue;
+      const info = { id: id, scale: getExportScaleForSymbol(source, PREVIEW_RENDER_SIZE) };
+      let componentId = String(source.symbolId || '');
+      try {
+        const native = source.sketchObject || source;
+        if (!componentId && native && typeof native.symbolID === 'function') componentId = String(native.symbolID());
+      } catch (e) {}
+      if (componentId) sourceIdsByComponentId[componentId] = info;
+      if (Object.prototype.hasOwnProperty.call(sourceIdsByName, name)) {
+        sourceIdsByName[name] = null;
+      } else {
+        sourceIdsByName[name] = info;
+      }
+    }
+    return { byName: sourceIdsByName, byComponentId: sourceIdsByComponentId };
+  } catch (e) {
+    log("[PreviewAgent] could not inspect library sources for " + String(library && library.name || '?') + ": " + e);
+    return null;
+  }
+}
+
+function queuePreviewAgentFromSymbolsJson(symbolsJson, document) {
+  if (!previewAgent) return;
+  const buildToken = ++previewQueueBuildToken;
+  const queue = [];
+  try {
+    const symbols = JSON.parse(String(symbolsJson || '[]'));
+    const rowsByLibrary = {};
+    symbols.forEach(function(row) {
+      if (!row || row.library === null || row.library === undefined || row.library === '' || !row.id) return;
+      const key = String(row.library) + '|' + String(row.libraryName || '');
+      if (!rowsByLibrary[key]) rowsByLibrary[key] = [];
+      rowsByLibrary[key].push(row);
+    });
+
+    const libraries = getEnabledLibraries(document);
+    const libraryVersionTags = [];
+    let cachedCount = 0, libraryIndex = 0, rowIndex = 0;
+    function scanLibraryChunk() {
+      if (!previewAgent || buildToken !== previewQueueBuildToken) return;
+      if (libraryIndex >= libraries.length) {
+        prepareLocalPreviewSnapshot(symbols, document, submitQueue, function() {
+          return !!previewAgent && buildToken === previewQueueBuildToken;
+        }, libraryVersionTags.sort().join('|'));
+        return;
+      }
+      const library = libraries[libraryIndex];
+      const key = getLibraryCacheKey(library);
+      const rows = key ? rowsByLibrary[key] : null;
+      const libraryVersion = getLibraryVersionTag(library);
+      const libraryPath = getLibraryFilePathForPreviewAgent(library);
+      if (!rows || !rows.length || !libraryVersion || !libraryPath) {
+        libraryIndex++; rowIndex = 0;
+        setTimeout(scanLibraryChunk, 8);
+        return;
+      }
+      const versionTag = 'lib:' + libraryVersion;
+      if (rowIndex === 0) libraryVersionTags.push(versionTag);
+      const started = Date.now();
+      let processed = 0;
+      while (rowIndex < rows.length && processed < 32 && Date.now() - started < 6) {
+        const row = rows[rowIndex++];
+        processed++;
+        const id = String(row.id);
+        if (previewVersionTagBySymbol[id] && previewVersionTagBySymbol[id] !== versionTag) previewMemoryCache.delete(id);
+        previewVersionTagBySymbol[id] = versionTag;
+        if (hasValidDiskPreview(id, versionTag)) { cachedCount++; continue; }
+        // Only metadata crosses the bridge. The worker resolves component IDs
+        // to layer IDs and sizes directly from the archive, off the UI thread.
+        queue.push({
+          symbolId: id,
+          name: String(row.name || ''),
+          libraryID: String(library.id || ''),
+          libraryName: String(library.name || ''),
+          libraryPath: libraryPath,
+          versionTag: versionTag
+        });
+      }
+      if (rowIndex >= rows.length) { libraryIndex++; rowIndex = 0; }
+      setTimeout(scanLibraryChunk, 8);
+    }
+
+    function submitQueue(localItems) {
+      if (!previewAgent || buildToken !== previewQueueBuildToken) return;
+      localItems.forEach(function(item) { queue.push(item); });
+      queue.sort(function(a, b) {
+        const pathOrder = a.libraryPath.localeCompare(b.libraryPath);
+        if (pathOrder) return pathOrder;
+        const scaleOrder = Number(a.scale) - Number(b.scale);
+        return scaleOrder || a.symbolId.localeCompare(b.symbolId);
+      });
+      previewAgent.setPendingItems_(queue);
+      const state = runtimeBrowserState;
+      pendingForegroundPreviewIDs.forEach(function(id) {
+        const tag = previewVersionTagBySymbol[id];
+        const cached = tag && readDiskPreview(id, tag);
+        if (cached && state && state.isVisible && state.docId === getDocumentIdentifier(document)) {
+          setCachedPreview(id, cached);
+          sendPreviewToUI(state.webView, id, cached);
+          pendingForegroundPreviewIDs.delete(id);
+          return;
+        }
+        try { previewAgent.requestPreviewForSymbolID_(id); } catch (e) {}
+      });
+      if (state && state.webView && !state.closed && getDocumentIdentifier(document) === state.docId) {
+        state.localPreviewLiveRevision = getLocalPreviewLiveRevision(document);
+        evaluateWebScriptSafely(state.webView, 'window.applyPreviewVersionTags && window.applyPreviewVersionTags(' + JSON.stringify(previewVersionTagBySymbol) + ');');
+      }
+      log("[PreviewAgent] cache scan: " + cachedCount + " valid library previews, " + queue.length + " pending previews including " + localItems.length + " local");
+    }
+    setTimeout(scanLibraryChunk, 0);
+  } catch (e) {
+    log("[PreviewAgent] failed to queue previews: " + e);
+  }
+}
+
+function prepareLocalPreviewSnapshot(symbols, document, callback, shouldContinue, librarySignature) {
+  const rows = symbols.filter(function(row) { return row && row.library === null && row.id; });
+  if (rows.length === 0) { callback([]); return; }
+  ensureSymbolLookupCache(document);
+  // Refresh wrappers after edits; retain the independently cached library refs.
+  const localModels = getDocumentSymbolMetadata(document);
+  symbolLookupCache.localById = createLazyLocalSymbolLookup(localModels);
+  const localModelsById = {};
+  localModels.forEach(function(meta) { localModelsById[meta.id] = meta; });
+  const missing = [];
+  const localItems = [];
+  const itemsByComponentID = {};
+  const documentId = String(getDocumentIdentifier(document));
+  const dependencyVersions = new Map();
+  const visitingDependencies = new Set();
+  let index = 0;
+  function scanChunk() {
+    if (!shouldContinue()) return;
+    const chunkStarted = Date.now();
+    const end = Math.min(index + 16, rows.length);
+    for (; index < end; index++) {
+      if (index > 0 && Date.now() - chunkStarted >= 6) break;
+      const id = String(rows[index].id);
+      const master = localModelsById[id];
+      if (!master) continue;
+      const versionTag = getSymbolVersionTag(master, null, id, document);
+      if (!versionTag) continue;
+      const item = {
+        symbolId: id, sourceSymbolId: id,
+        scale: getExportScaleForSymbol(master, PREVIEW_RENDER_SIZE),
+        libraryID: '', libraryName: 'Local Document', baseVersionTag: versionTag
+      };
+      localItems.push(item);
+      const componentID = master.componentId || String(master.sketchObject.symbolID());
+      itemsByComponentID[componentID] = item;
+    }
+    if (index < rows.length) { setTimeout(scanChunk, 8); return; }
+    checkCacheChunk(0);
+  }
+  function dependencyRevision(root) {
+    if (dependencyVersions.has(root.symbolId)) return dependencyVersions.get(root.symbolId);
+    if (visitingDependencies.has(root.symbolId)) return root.baseVersionTag;
+    visitingDependencies.add(root.symbolId);
+    const parts = [root.symbolId + ':' + root.baseVersionTag];
+    const memo = localPreviewVersionMemo.get(documentId + '|' + root.symbolId);
+    (memo && memo.references || []).forEach(function(reference) {
+      const child = itemsByComponentID[reference];
+      if (child && child !== root) parts.push(child.symbolId + ':' + dependencyRevision(child));
+    });
+    visitingDependencies.delete(root.symbolId);
+    const revision = previewContentHash(parts.sort().join('|') + '|' + String(librarySignature || ''));
+    dependencyVersions.set(root.symbolId, revision);
+    return revision;
+  }
+  function checkCacheChunk(start) {
+    if (!shouldContinue()) return;
+    const end = Math.min(start + 32, localItems.length);
+    for (let i = start; i < end; i++) {
+      const item = localItems[i];
+      item.versionTag = item.baseVersionTag + ':doc:' + dependencyRevision(item);
+      if (previewVersionTagBySymbol[item.symbolId] && previewVersionTagBySymbol[item.symbolId] !== item.versionTag) previewMemoryCache.delete(item.symbolId);
+      previewVersionTagBySymbol[item.symbolId] = item.versionTag;
+      if (!hasValidDiskPreview(item.symbolId, item.versionTag)) missing.push(item);
+    }
+    if (end < localItems.length) { setTimeout(function() { checkCacheChunk(end); }, 8); return; }
+    if (!missing.length) { callback([]); return; }
+    try {
+      const snapshotRoot = getPreviewDiskCacheRoot() + '/local-snapshots';
+      NSFileManager.defaultManager().createDirectoryAtPath_withIntermediateDirectories_attributes_error_(snapshotRoot, true, null, null);
+      const snapshotPath = snapshotRoot + '/' + String(getDocumentIdentifier(document)).replace(/[^A-Za-z0-9_.-]/g, '_') + '.sketch';
+      // SaveTo is Sketch's asynchronous copy operation. It preserves the live
+      // document's path and unsaved changes, including cloud/unsaved documents.
+      document.save(snapshotPath, { saveMode: sketch.Document.SaveMode.SaveTo }, function(error) {
+        if (!shouldContinue()) return;
+        if (error) { log('[PreviewAgent] local snapshot failed: ' + error); callback([]); return; }
+        missing.forEach(function(item) { item.libraryPath = snapshotPath; });
+        callback(missing);
+      });
+    } catch (e) { log('[PreviewAgent] local snapshot failed: ' + e); callback([]); }
+  }
+  setTimeout(scanChunk, 0);
+}
+
+function deferPreviewAgentQueueFromSymbolsJson(symbolsJson, document, browserState, reloadToken, expectedDocId) {
+  setTimeout(function() {
+    if (!previewAgent || !document) return;
+    if (browserState && (browserState.closed || browserState.reloadToken !== reloadToken || browserState.docId !== expectedDocId)) return;
+    if (getDocumentIdentifier(document) !== expectedDocId) return;
+    queuePreviewAgentFromSymbolsJson(symbolsJson, document);
+  }, 0);
 }
 
 function getCachedLibrarySymbols(library) {
@@ -1152,91 +1724,6 @@ function findL2EntryForSymbolId(symbolId) {
   return null;
 }
 
-// After an L1 (full symbols JSON) cache hit, the UI is rendered instantly but
-// the live MSShareableObjectReference objects are NOT in
-// symbolLookupCache.libraryRefById. The first preview request would then fall
-// back to scanning every enabled library to find a single symbol — sync, slow,
-// and repeats per library. Instead, after a successful cache-hit render we
-// fire-and-forget this warmup: one library per setTimeout tick, populating
-// libraryRefById from a single getImportableSymbolReferencesForDocument call
-// per library. By the time the user scrolls and lands on a previewed item,
-// the refs are usually ready.
-//
-// Cooperatively cancels via cancelToken if the browser closes or another
-// warmup starts.
-function startLibraryRefsWarmup(browserState) {
-  if (!browserState || browserState.closed || !browserState.document) return;
-  if (refWarmupState.inProgress) return;
-
-  const document = browserState.document;
-  const enabledLibraries = getEnabledLibraries();
-  if (enabledLibraries.length === 0) return;
-
-  refWarmupState.inProgress = true;
-  refWarmupState.cancelToken += 1;
-  const myToken = refWarmupState.cancelToken;
-
-  ensureSymbolLookupCache(document);
-
-  let index = 0;
-
-  function step() {
-    if (myToken !== refWarmupState.cancelToken) {
-      refWarmupState.inProgress = false;
-      return;
-    }
-    if (!browserState || browserState.closed) {
-      refWarmupState.inProgress = false;
-      return;
-    }
-    if (index >= enabledLibraries.length) {
-      refWarmupState.inProgress = false;
-      log("[Warmup] library refs ready");
-      return;
-    }
-
-    const library = enabledLibraries[index++];
-
-    // Quick check: probe whether refs from this library are already warmed.
-    // We use a single id from the L2 cache as a marker.
-    let alreadyWarmed = false;
-    const cachedLib = getCachedLibrarySymbols(library);
-    if (cachedLib && cachedLib.symbols.length > 0) {
-      const probeId = cachedLib.symbols[0].id;
-      if (symbolLookupCache.libraryRefById[probeId]) {
-        alreadyWarmed = true;
-      }
-    }
-
-    if (!alreadyWarmed) {
-      try {
-        const libIdStr = String(library.id || '');
-        const refs = library.getImportableSymbolReferencesForDocument(document);
-        const leanForCache = [];
-        refs.forEach(function(ref) {
-          symbolLookupCache.libraryRefById[ref.id] = ref;
-          symbolLookupCache.libraryIdById[ref.id] = libIdStr;
-          leanForCache.push({ id: String(ref.id), name: String(ref.name) });
-        });
-        // Keep L2 fresh while we're at it — if the library's lastModifiedAt
-        // changed under us, this stores the new symbol set for future opens.
-        setCachedLibrarySymbols(library, leanForCache);
-      } catch (e) {
-        log("[Warmup] failed for " + library.name + ": " + e);
-      }
-    }
-
-    setTimeout(step, 0);
-  }
-
-  step();
-}
-
-function cancelLibraryRefsWarmup() {
-  refWarmupState.cancelToken += 1;
-  refWarmupState.inProgress = false;
-}
-
 // L1 cache: full merged symbol JSON per document. Keyed by docId, so switching
 // documents preserves caches for previously-visited docs. Each entry stores its
 // own validity signature (library set + local symbol count) so we can detect
@@ -1248,7 +1735,7 @@ function cancelLibraryRefsWarmup() {
 // refs on every cache read (defeats the cache).
 function getLocalSymbolsFingerprint(document) {
   try {
-    const syms = document.getSymbols();
+    const syms = getDocumentSymbolMetadata(document);
     const parts = [];
     for (let i = 0; i < syms.length; i++) {
       parts.push(String(syms[i].id || '') + ':' + String(syms[i].name || ''));
@@ -1260,6 +1747,16 @@ function getLocalSymbolsFingerprint(document) {
   }
 }
 
+// Runtime-only identity: cheap enough to check on reopening, never persisted.
+// Content checksums are calculated in small chunks only when this changes.
+function getLocalPreviewLiveRevision(document) {
+  try {
+    return getDocumentSymbolMetadata(document).map(function(master) {
+      return String(master.id) + ':' + String(master._revision || master.sketchObject.immutableModelObject().hash());
+    }).sort().join('|');
+  } catch (e) { return ''; }
+}
+
 function getCachedSymbolsJson(document) {
   const docId = getDocumentIdentifier(document);
   if (!docId) return null;
@@ -1268,13 +1765,10 @@ function getCachedSymbolsJson(document) {
   const entry = cache[docId];
   if (!entry || !entry.symbolsJson) return null;
 
-  const currentLocalCount = document.getSymbols().length;
-  const enabledLibraries = getEnabledLibraries();
-  const currentEnabledLibraryCount = enabledLibraries.length;
-  const currentLibrarySignature = getEnabledLibrarySignatureFromLibraries(enabledLibraries);
-  if (Number(entry.localSymbolCount || 0) !== currentLocalCount) return null;
-  if (Number(entry.enabledLibraryCount || 0) !== currentEnabledLibraryCount) return null;
-  if (String(entry.enabledLibrarySignature || "") !== currentLibrarySignature) return null;
+  const signature = getDocumentContentSignature(document);
+  if (Number(entry.localSymbolCount || 0) !== signature.localSymbolCount) return null;
+  if (Number(entry.enabledLibraryCount || 0) !== signature.enabledLibraryCount) return null;
+  if (String(entry.enabledLibrarySignature || "") !== signature.enabledLibrarySignature) return null;
   // Rename detection for local symbols.
   if (String(entry.localSymbolsFingerprint || "") !== getLocalSymbolsFingerprint(document)) {
     log("[L1] local symbol name change detected — invalidating cache for doc=" + docId);
@@ -1301,16 +1795,21 @@ function setCachedSymbolsJson(document, symbolsJson) {
   delete cache.enabledLibraryCount;
   delete cache.enabledLibrarySignature;
 
-  const enabledLibraries = getEnabledLibraries();
+  const enabledLibraries = getEnabledLibraries(document);
   cache[docId] = {
     symbolsJson: String(lean),
-    localSymbolCount: String(document.getSymbols().length),
+    localSymbolCount: String(getDocumentSymbolCount(document)),
     enabledLibraryCount: String(enabledLibraries.length),
     enabledLibrarySignature: getEnabledLibrarySignatureFromLibraries(enabledLibraries),
     localSymbolsFingerprint: getLocalSymbolsFingerprint(document),
     updatedAt: String(Date.now())
   };
   Settings.setSettingForKey(SYMBOLS_CACHE_KEY, cache);
+  storeComponentCount(document, JSON.parse(String(lean)).length, {
+    localSymbolCount: Number(cache[docId].localSymbolCount),
+    enabledLibrarySignature: cache[docId].enabledLibrarySignature
+  });
+  return cache[docId].localSymbolsFingerprint;
 }
 
 function getSavedUiState(document) {
@@ -1337,27 +1836,43 @@ function setSavedUiState(document, uiStateJson) {
   Settings.setSessionVariable(UI_STATE_CACHE_KEY, cache);
 }
 
-function getCachedPreview(symbolId) {
-  if (!symbolId) return null;
-
-  const cache = getOrCreatePreviewCache();
-  const value = cache[String(symbolId)];
-  return value ? String(value) : null;
-}
-
-function setCachedPreview(symbolId, preview) {
-  if (!symbolId || !preview) return;
-
-  const cache = getOrCreatePreviewCache();
-  cache[String(symbolId)] = String(preview);
-  Settings.setSessionVariable(PREVIEW_CACHE_KEY, cache);
-}
-
 function getActiveDocument() {
   try {
     return sketch.getSelectedDocument();
   } catch (e) {
     return null;
+  }
+}
+
+function getBrowserPreferences() {
+  const stored = Settings.settingForKey(BROWSER_PREFERENCES_KEY) || {};
+  return {
+    appearance: ['light', 'dark', 'auto'].indexOf(String(stored.appearance)) >= 0 ? String(stored.appearance) : 'auto'
+  };
+}
+
+function loadBrowserPanelClass(context) {
+  try {
+    const path = context.scriptURL.URLByDeletingLastPathComponent()
+      .URLByDeletingLastPathComponent().URLByAppendingPathComponent('Resources')
+      .URLByAppendingPathComponent('BrowserPanel.framework').path();
+    const bundle = NSBundle.bundleWithPath_(path);
+    if (!bundle || !bundle.load()) throw new Error('BrowserPanel.framework could not load');
+    return NSClassFromString('CBStableBrowserPanel');
+  } catch (error) {
+    log('[BrowserPanel] ' + error);
+    return null;
+  }
+}
+
+function retireLegacyBrowserWindow() {
+  const prefix = 'com.funkyplugins.componentbrowser.stable.';
+  const oldWindow = getThreadDictionaryObject(prefix + 'window');
+  const oldWebView = getThreadDictionaryObject(prefix + 'webView');
+  if (oldWebView) evaluateWebScriptSafely(oldWebView, 'window.setBrowserActive && window.setBrowserActive(false);');
+  setThreadDictionaryObject(prefix + 'visible', '0');
+  if (oldWindow) {
+    try { oldWindow.orderOut(nil); } catch (error) {}
   }
 }
 
@@ -1418,7 +1933,9 @@ function applyBrowserDocument(browserState, document) {
 }
 
 function getDocumentContentSignature(document) {
-  const enabledLibraries = document ? getEnabledLibraries() : [];
+  const snapshot = document && getDocumentTurnSnapshot(document);
+  if (snapshot && snapshot.signature) return snapshot.signature;
+  const enabledLibraries = document ? getEnabledLibraries(document) : [];
 
   if (!document) {
     return {
@@ -1428,11 +1945,11 @@ function getDocumentContentSignature(document) {
     };
   }
 
-  return {
-    localSymbolCount: document.getSymbols().length,
+  return (snapshot.signature = {
+    localSymbolCount: getDocumentSymbolCount(document),
     enabledLibraryCount: enabledLibraries.length,
     enabledLibrarySignature: getEnabledLibrarySignatureFromLibraries(enabledLibraries)
-  };
+  });
 }
 
 function updateBrowserContentSignature(browserState, document) {
@@ -1442,6 +1959,7 @@ function updateBrowserContentSignature(browserState, document) {
   browserState.localSymbolCount = signature.localSymbolCount;
   browserState.enabledLibraryCount = signature.enabledLibraryCount;
   browserState.enabledLibrarySignature = signature.enabledLibrarySignature;
+  browserState.localPreviewLiveRevision = getLocalPreviewLiveRevision(document);
   setThreadDictionaryObject(DOC_LOCAL_COUNT_KEY, String(signature.localSymbolCount));
   setThreadDictionaryObject(DOC_LIBRARY_COUNT_KEY, String(signature.enabledLibraryCount));
   setThreadDictionaryObject(DOC_LIBRARY_SIGNATURE_KEY, String(signature.enabledLibrarySignature));
@@ -1582,20 +2100,21 @@ function getBrowserWebView(browserState, webViewWindow) {
   }
 }
 
-function hideBrowserWindow(browserState) {
+function hideBrowserWindow(browserState, animated) {
   if (!browserState || browserState.closed) return;
 
   browserState.isVisible = false;
   setBrowserVisibility(false);
+  setPreviewAgentBusy(false);
   clearQueuedPreviewRequestsForWebView(browserState.webView);
-  cancelLibraryRefsWarmup();
   evaluateWebScriptSafely(browserState.webView,
     'if (window.setBrowserActive) { window.setBrowserActive(false); }');
 
   const webViewWindow = browserState.webViewWindow || getThreadDictionaryObject(WINDOW_IDENTIFIER);
   if (webViewWindow) {
     try {
-      webViewWindow.orderOut(nil);
+      if (animated) webViewWindow.fadeOut();
+      else webViewWindow.orderOut(nil);
     } catch (e) {}
   }
 }
@@ -1606,8 +2125,8 @@ function destroyBrowserWindow(browserState) {
   browserState.closed = true;
   browserState.isVisible = false;
   setBrowserVisibility(false);
+  setPreviewAgentBusy(false);
   clearQueuedPreviewRequestsForWebView(browserState.webView);
-  cancelLibraryRefsWarmup();
 
   const threadDictionary = NSThread.mainThread().threadDictionary();
   const webViewWindow = browserState.webViewWindow || getThreadDictionaryObject(WINDOW_IDENTIFIER);
@@ -1641,12 +2160,13 @@ function loadSymbolsIntoBrowser(browserState, options) {
   const showLoader = settings.showLoader !== false;
   const forceRefresh = settings.forceRefresh === true;
   const requestedReloadMode = settings.reloadMode || 'full';
+  const preserveCurrentContents = settings.preserveCurrentContents === true;
   const reloadToken = ++browserState.reloadToken;
   const expectedDocId = browserState.docId;
   const document = browserState.document;
   const webView = browserState.webView;
   const savedUiStateJson = getSavedUiState(document) || 'null';
-  const scanConfig = showLoader ? {
+  const scanConfig = showLoader || preserveCurrentContents ? {
     symbolBatchSize: RESPONSIVE_SYMBOL_SCAN_BATCH_SIZE,
     libraryBatchSize: RESPONSIVE_SYMBOL_SCAN_LIBRARY_BATCH_SIZE
   } : {
@@ -1657,32 +2177,27 @@ function loadSymbolsIntoBrowser(browserState, options) {
   clearQueuedPreviewRequestsForWebView(webView);
   invalidateSymbolLookupCache();
 
-  if (showLoader) {
+  if (showLoader && !preserveCurrentContents) {
     evaluateWebScriptSafely(webView, 'window.setLoading(true);');
   }
 
   const cachedSymbolsJson = forceRefresh ? null : getCachedSymbolsJson(document);
   if (cachedSymbolsJson) {
     if (!browserState.closed && browserState.reloadToken === reloadToken && browserState.docId === expectedDocId) {
-      log("[Diag] L1 hit doc=" + (browserState.docId || '?') + " jsonBytes=" + cachedSymbolsJson.length + " libSig=" + getEnabledLibrarySignatureFromLibraries(getEnabledLibraries()));
-      // If createBrowserWindow already baked the same data into INITIAL_SYMBOLS
-      // we'd just be re-running loadSymbols against a freshly-loaded HTML and
-      // resetting UI state (scroll, selection). Skip the evaluate; the UI is
-      // about to (or has already) auto-loaded from window.INITIAL_SYMBOLS.
-      if (browserState.initialSymbolsInjected) {
-        browserState.initialSymbolsInjected = false;
+      if (preserveCurrentContents && requestedReloadMode !== 'full') {
         updateBrowserContentSignature(browserState, document);
-        log("Loaded symbols from cache (via initial HTML inject)");
-        setTimeout(function() { startLibraryRefsWarmup(browserState); }, 0);
-        scheduleL1VerifyRefresh(browserState);
+        log("Kept current UI after cache validation");
+        deferPreviewAgentQueueFromSymbolsJson(cachedSymbolsJson, document, browserState, reloadToken, expectedDocId);
         return;
       }
 
       updateBrowserContentSignature(browserState, document);
-      evaluateWebScriptSafely(webView, 'window.loadSymbols(' + cachedSymbolsJson + ', ' + savedUiStateJson + ');');
+      setTimeout(function() {
+        if (browserState.closed || browserState.reloadToken !== reloadToken || browserState.docId !== expectedDocId) return;
+        evaluateWebScriptSafely(webView, 'window.loadSymbols(' + cachedSymbolsJson + ', ' + savedUiStateJson + ', ' + JSON.stringify(expectedDocId) + ');');
+      }, 8);
       log("Loaded symbols from cache");
-      setTimeout(function() { startLibraryRefsWarmup(browserState); }, 0);
-      scheduleL1VerifyRefresh(browserState);
+      deferPreviewAgentQueueFromSymbolsJson(cachedSymbolsJson, document, browserState, reloadToken, expectedDocId);
     }
     return;
   }
@@ -1727,21 +2242,21 @@ function loadSymbolsIntoBrowser(browserState, options) {
   };
 
   function onSymbolsScanned(symbolsJson, symbolCount) {
-    log("Found " + symbolCount + " symbols");
+    log("Found " + symbolCount + " components");
 
     if (!symbolsJson || symbolsJson === "[]") {
-      evaluateWebScriptSafely(webView, 'window.setLoading(false); window.loadSymbols([], ' + savedUiStateJson + ');');
-      UI.message("❌ No symbols found");
+      evaluateWebScriptSafely(webView, 'window.setLoading(false); window.loadSymbols([], ' + savedUiStateJson + ', ' + JSON.stringify(expectedDocId) + ');');
+      UI.message("❌ No components found");
       return;
     }
 
-    // Strip previews once and use the lean version both for persistence and
-    // for the evaluateWebScript payload. Previews remain in the session cache
-    // and are pushed lazily via update-symbol-preview as items become visible.
+    // Strip previews once and persist only lean metadata. Thumbnails remain in
+    // the durable PNG cache and are loaded from disk as rows become visible.
     const lean = stripPreviewsFromSymbolsJson(symbolsJson);
-    setCachedSymbolsJson(document, lean);
+    browserState.localFingerprint = setCachedSymbolsJson(document, lean);
     updateBrowserContentSignature(browserState, document);
-    evaluateWebScriptSafely(webView, 'window.loadSymbols(' + lean + ', ' + savedUiStateJson + ');');
+    evaluateWebScriptSafely(webView, 'window.loadSymbols(' + lean + ', ' + savedUiStateJson + ', ' + JSON.stringify(expectedDocId) + ');');
+    deferPreviewAgentQueueFromSymbolsJson(lean, document, browserState, reloadToken, expectedDocId);
   }
 
   if (showLoader) {
@@ -1781,19 +2296,13 @@ function startDocumentSwitchWatcher(browserState) {
 
 function onRun(context) {
   log("=== Component Browser Started ===");
+  retireLegacyBrowserWindow();
+  cancelStartupPreviewPrewarm();
 
   // Bootstrap the hotkey agent if Sketch's Startup action hasn't fired yet
   // (e.g. just-installed plugin). Subsequent restarts fire onStartup directly.
-  if (!hotkeyAgent) {
-    hotkeyContext = context;
-    setupHotkeyAgent(context);
-  }
-  // Background preview crawler — only starts in this (Run) JS context, where
-  // Sketch's libraries are loaded and the private-API render works. Cross-
-  // context lock guards against duplicate starts when the user re-opens the
-  // plugin while a crawler is already running.
-  maybeStartCrawler(context);
-
+  hotkeyContext = context;
+  setPreviewAgentBusy(true);
   const threadDictionary = NSThread.mainThread().threadDictionary();
 
   // Get document first (needed for document change detection)
@@ -1807,11 +2316,12 @@ function onRun(context) {
   const currentDocId = getDocumentIdentifier(document);
   
   const existingWindow = getThreadDictionaryObject(WINDOW_IDENTIFIER);
-  const runtimeBrowserState = buildBrowserStateFromRuntime(document);
+  runtimeBrowserState = buildBrowserStateFromRuntime(document);
 
   if (existingWindow && runtimeBrowserState && !runtimeBrowserState.closed) {
     const isDifferentDocument = runtimeBrowserState.docId !== currentDocId;
-    const reloadMode = isDifferentDocument ? 'full' : getSymbolsReloadMode(runtimeBrowserState, document);
+    const foregroundOpenToken = Number(runtimeBrowserState.foregroundOpenToken || 0) + 1;
+    runtimeBrowserState.foregroundOpenToken = foregroundOpenToken;
 
     // Always reuse the existing WebView when one is around — even on a doc
     // switch with the window hidden. Destroying + recreating costs an HTML
@@ -1821,10 +2331,17 @@ function onRun(context) {
     if (isDifferentDocument) {
       log("Document changed, reusing browser window (was " + (runtimeBrowserState.isVisible ? "visible" : "hidden") + ")");
       applyBrowserDocument(runtimeBrowserState, document);
+      evaluateWebScriptSafely(runtimeBrowserState.webView, 'window.setLoading(true);');
     }
+
+    evaluateWebScriptSafely(runtimeBrowserState.webView,
+      'window.setComponentCount(' + JSON.stringify(getReadyComponentCount(document)) + ');');
 
     runtimeBrowserState.isVisible = true;
     setBrowserVisibility(true);
+    setPreviewAgentBusy(true);
+    existingWindow.setAlphaValue_(0);
+    existingWindow.fadeIn();
     existingWindow.makeKeyAndOrderFront(nil);
     const webView = getBrowserWebView(runtimeBrowserState, existingWindow);
     if (webView) {
@@ -1855,30 +2372,48 @@ function onRun(context) {
       log("Window already open, bringing to front");
     }
 
-    // Cheap local-symbol freshness check: if any local symbol was renamed
-    // (or added/removed) since the last load, the symbolsJson stored on the
-    // browserState is stale. The fingerprint walk only touches
-    // document.getSymbols() so it's cheap (no library API calls).
-    let localFingerprintChanged = false;
-    if (!reloadMode) {
-      try {
-        const liveFp = getLocalSymbolsFingerprint(document);
-        if (runtimeBrowserState.localFingerprint !== liveFp) {
-          runtimeBrowserState.localFingerprint = liveFp;
-          localFingerprintChanged = true;
-        }
-      } catch (e) {}
-    }
+    // Freshness checks walk every local component and query Sketch's enabled
+    // libraries. Let the panel render and finish its entrance first so the
+    // first visible response is immediate, then validate in the background.
+    setTimeout(function() {
+      if (runtimeBrowserState.closed || !runtimeBrowserState.isVisible
+        || runtimeBrowserState.foregroundOpenToken !== foregroundOpenToken) return;
+      const activeDocument = getActiveDocument();
+      if (!activeDocument || getDocumentIdentifier(activeDocument) !== currentDocId) return;
+      const reloadMode = isDifferentDocument ? 'full' : getSymbolsReloadMode(runtimeBrowserState, document);
+      let localFingerprintChanged = false;
+      if (!reloadMode) {
+        try {
+          const liveFp = getLocalSymbolsFingerprint(document);
+          if (runtimeBrowserState.localFingerprint !== liveFp) {
+            runtimeBrowserState.localFingerprint = liveFp;
+            localFingerprintChanged = true;
+          }
+        } catch (e) {}
+      }
 
-    if (reloadMode || localFingerprintChanged) {
-      loadSymbolsIntoBrowser(runtimeBrowserState, {
-        showLoader: isDifferentDocument,
-        reloadMode: localFingerprintChanged ? 'local' : reloadMode
-      });
-    }
-    // Chunked async verify on warm reopen — catches in-memory library
-    // renames without blocking the main thread.
-    scheduleL1VerifyRefresh(runtimeBrowserState);
+      if (reloadMode || localFingerprintChanged) {
+        loadSymbolsIntoBrowser(runtimeBrowserState, {
+          showLoader: isDifferentDocument,
+          preserveCurrentContents: !isDifferentDocument,
+          reloadMode: localFingerprintChanged ? 'local' : reloadMode
+        });
+      } else if (runtimeBrowserState.localPreviewLiveRevision !== getLocalPreviewLiveRevision(document)) {
+        const currentSymbolsJson = getCachedSymbolsJson(document);
+        if (currentSymbolsJson) {
+          deferPreviewAgentQueueFromSymbolsJson(currentSymbolsJson, document, runtimeBrowserState,
+            runtimeBrowserState.reloadToken, currentDocId);
+        }
+      }
+    }, INITIAL_BROWSER_WORK_DELAY_MS);
+
+    // Startup actions normally initialize the agents before the user invokes
+    // the hotkey. Keep the first-run fallback off the visible-window path too.
+    setTimeout(function() {
+      if (!hotkeyAgent) setupHotkeyAgent(context);
+      if (!previewAgent) setupPreviewAgent(context);
+      setPreviewAgentBusy(true);
+    }, INITIAL_BROWSER_WORK_DELAY_MS);
     return;
   }
 
@@ -1900,23 +2435,19 @@ function onRun(context) {
   // Show window immediately with loading state
   // Symbols will be loaded asynchronously
 
-  const windowWidth = 700, windowHeight = 600;
-
-  const webViewWindow = NSPanel.alloc().init();
-  webViewWindow.setFrame_display(NSMakeRect(0, 0, windowWidth, windowHeight), true);
-  
-  // Full size content view window - content extends to titlebar area
-  webViewWindow.setStyleMask(NSTitledWindowMask | NSClosableWindowMask | NSTexturedBackgroundWindowMask | NSFullSizeContentViewWindowMask);
-  webViewWindow.setTitlebarAppearsTransparent(true);
-  webViewWindow.setTitleVisibility(NSWindowTitleHidden);
-  webViewWindow.setTitle("");
-  webViewWindow.setOpaque(false);
-  webViewWindow.setBackgroundColor(NSColor.clearColor());
-  
-  // Hide titlebar buttons; close via Esc inside the UI.
-  webViewWindow.standardWindowButton(NSWindowCloseButton).setHidden(true);
-  webViewWindow.standardWindowButton(NSWindowMiniaturizeButton).setHidden(true);
-  webViewWindow.standardWindowButton(NSWindowZoomButton).setHidden(true);
+  const panelClass = loadBrowserPanelClass(context);
+  if (!panelClass) {
+    UI.message('Component Browser could not load its window framework');
+    return;
+  }
+  let initialSavedState = {};
+  try { initialSavedState = JSON.parse(getSavedUiState(document) || '{}') || {}; } catch (error) {}
+  const initialExpanded = nextLaunchMode === 'settings' || shouldShowUpdateNotice()
+    || !!String(initialSavedState.query || '').trim();
+  const windowWidth = 701, windowHeight = initialExpanded ? 490 : 64;
+  const webViewWindow = panelClass.browserPanel();
+  webViewWindow.setPresentationExpanded_animated_(initialExpanded, false);
+  webViewWindow.setPreferredAppearance_(getBrowserPreferences().appearance);
 
   webViewWindow.becomeKeyWindow();
   webViewWindow.setLevel(NSFloatingWindowLevel);
@@ -1928,23 +2459,19 @@ function onRun(context) {
   const htmlUrl = scriptFolder.URLByAppendingPathComponent("symbol-browser-ui.html");
   const htmlData = NSData.dataWithContentsOfURL(htmlUrl);
   let html = String(NSString.alloc().initWithData_encoding(htmlData, NSUTF8StringEncoding));
+  // Legacy WebView caches local stylesheets across document reloads. Read the
+  // bundled CSS into this document so installed updates cannot reuse old rules.
+  const cssUrl = scriptFolder.URLByAppendingPathComponent('browser-redesign.css');
+  const cssData = NSData.dataWithContentsOfURL(cssUrl);
+  if (cssData) {
+    const css = String(NSString.alloc().initWithData_encoding(cssData, NSUTF8StringEncoding));
+    html = html.replace('<link rel="stylesheet" href="browser-redesign.css">', function() {
+      return '<style id="browser-redesign-styles">' + css + '</style>';
+    });
+  }
   const contentView = webViewWindow.contentView();
 
-  // If we have a valid persistent cache for this document, inject the symbol
-  // data directly into the HTML *before* loadHTMLString runs. The UI's
-  // DOMContentLoaded handler picks up window.INITIAL_SYMBOLS and renders
-  // immediately, sidestepping the race where evaluateWebScript fires against
-  // an empty document (no window.loadSymbols defined yet) and the spinner
-  // stays up forever.
-  const initialSymbolsJson = getCachedSymbolsJson(document);
-  let initialSymbolsInjected = false;
   let injectScript = '';
-  if (initialSymbolsJson) {
-    const initialStateJson = getSavedUiState(document) || 'null';
-    injectScript += 'window.INITIAL_SYMBOLS = ' + initialSymbolsJson + '; window.INITIAL_UI_STATE = ' + initialStateJson + ';';
-    initialSymbolsInjected = true;
-    log("[Init] injected " + initialSymbolsJson.length + " bytes of cached symbols into HTML");
-  }
   if (nextLaunchMode) {
     injectScript += 'window.INITIAL_MODE = ' + JSON.stringify(nextLaunchMode) + ';';
     log("[Init] injected INITIAL_MODE=" + nextLaunchMode);
@@ -1958,6 +2485,15 @@ function onRun(context) {
     const initialHk = getStoredHotkey();
     injectScript += 'window.INITIAL_HOTKEY = ' + JSON.stringify(initialHk) + ';';
   }
+  injectScript += 'window.INITIAL_PREFERENCES = ' + JSON.stringify(getBrowserPreferences()) + ';';
+  injectScript += 'window.INITIAL_DOCUMENT_ID = ' + JSON.stringify(currentDocId) + ';';
+  const initialComponentCount = getReadyComponentCount(document);
+  injectScript += 'window.INITIAL_COMPONENT_COUNT = ' + JSON.stringify(initialComponentCount) + ';';
+  if (initialComponentCount !== null) {
+    html = html.replace('placeholder="Search components..."',
+      'placeholder="Search by ' + initialComponentCount + ' components..."');
+  }
+  injectScript += 'window.NATIVE_WINDOW_ANIMATIONS = true;';
   injectScript += 'window.UPDATE_NOTICE = ' + JSON.stringify({
     version: UPDATE_NOTICE_VERSION,
     visible: shouldShowUpdateNotice()
@@ -1985,16 +2521,11 @@ function onRun(context) {
     enabledLibrarySignature: null,
     libraryScanData: null,
     reloadToken: 0,
+    foregroundOpenToken: 1,
     webView: webView,
     webViewWindow: webViewWindow,
-    // Snapshot of local symbol id+name fingerprint at last load; updated on
-    // each warm reopen so we can detect in-canvas renames cheaply (just walks
-    // document.getSymbols(), no library API calls).
-    localFingerprint: getLocalSymbolsFingerprint(document),
-    // One-shot flag: the first loadSymbolsIntoBrowser call after a fresh
-    // createBrowserWindow can skip its cache-hit evaluate because the data
-    // was already baked into the HTML via INITIAL_SYMBOLS.
-    initialSymbolsInjected: initialSymbolsInjected
+    // Calculated after the first frame, so large documents do not delay show.
+    localFingerprint: null
   };
   syncBrowserRuntimeHandles(browserState);
   applyBrowserDocument(browserState, document);
@@ -2006,10 +2537,10 @@ function onRun(context) {
 
   const delegate = new MochaJSDelegate({
     "webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:": function(webView, message, frame) {
-      // log("Received message: " + message);
-      if (message.startsWith('insert-symbol:')) {
+      const bridgeMessage = String(message || '');
+      if (bridgeMessage.startsWith('insert-symbol:')) {
         try {
-          const symbolId = message.substring(14);
+          const symbolId = bridgeMessage.substring(14);
           const activeDocument = getActionDocument(browserState);
           if (!activeDocument) return;
           insertSymbol(symbolId, activeDocument, false, null, false);
@@ -2017,9 +2548,9 @@ function onRun(context) {
           log("ERROR: " + e);
           UI.message("❌ Error: " + e.message);
         }
-      } else if (message.startsWith('goto-symbol:')) {
+      } else if (bridgeMessage.startsWith('goto-symbol:')) {
         try {
-          const symbolId = message.substring(12);
+          const symbolId = bridgeMessage.substring(12);
           const activeDocument = getActionDocument(browserState);
           if (!activeDocument) return;
           gotoSymbolSource(symbolId, activeDocument, browserState);
@@ -2027,10 +2558,10 @@ function onRun(context) {
           log("[Goto] error: " + e);
           UI.message("❌ Could not navigate: " + e.message);
         }
-      } else if (message.startsWith('replace-symbol:')) {
+      } else if (bridgeMessage.startsWith('replace-symbol:')) {
         try {
           // Parse: replace-symbol:SYMBOL_ID:preserve or replace-symbol:SYMBOL_ID:original
-          const parts = message.substring(15).split(':');
+          const parts = bridgeMessage.substring(15).split(':');
           const symbolId = parts[0];
           const preserveDims = parts[1] === 'preserve';
           const activeDocument = getActionDocument(browserState);
@@ -2042,66 +2573,94 @@ function onRun(context) {
           log("ERROR: " + e);
           UI.message("❌ Error: " + e.message);
         }
-      } else if (message.startsWith('drag-window:')) {
+      } else if (bridgeMessage.startsWith('browser-presentation:')) {
+        const parts = bridgeMessage.split(':');
+        if (['compact', 'results', 'settings'].indexOf(parts[1]) < 0) return;
+        clearQueuedPreviewRequestsForWebView(webView);
+        setTimeout(function() {
+          webViewWindow.setPresentationExpanded_animated_(parts[1] !== 'compact', parts[2] === '1');
+        }, 0);
+      } else if (bridgeMessage.startsWith('browser-preferences:')) {
+        try {
+          const requested = JSON.parse(decodeURIComponent(bridgeMessage.substring(20)));
+          const preferences = {
+            appearance: ['light', 'dark', 'auto'].indexOf(requested.appearance) >= 0 ? requested.appearance : 'auto'
+          };
+          Settings.setSettingForKey(BROWSER_PREFERENCES_KEY, preferences);
+          webViewWindow.setPreferredAppearance_(preferences.appearance);
+        } catch (error) { log('[BrowserPreferences] ' + error); }
+      } else if (bridgeMessage.startsWith('drag-window:')) {
         // Handle window dragging
-        const parts = message.substring(12).split(':');
+        const parts = bridgeMessage.substring(12).split(':');
         const dx = parseFloat(parts[0]);
         const dy = parseFloat(parts[1]);
         const frame = webViewWindow.frame();
         webViewWindow.setFrame_display(NSMakeRect(frame.origin.x + dx, frame.origin.y - dy, frame.size.width, frame.size.height), true);
-      } else if (message.startsWith('get-preview-priority:')) {
-        _lastForegroundPreviewAt = Date.now();
-        const symbolId = message.substring(21);
+      } else if (bridgeMessage === 'finish-window-transition') {
+        if (webViewWindow && webViewWindow.finishPresentationTransition) {
+          webViewWindow.finishPresentationTransition();
+        }
+      } else if (bridgeMessage.startsWith('get-preview-priority:')) {
+        const request = parsePreviewRequestPayload(bridgeMessage.substring(21));
+        const symbolId = request.id;
         const previewDocument = browserState.document;
-        if (!previewDocument) return;
+        if (!previewDocument || !symbolId) return;
         verbosePreviewLog("Priority preview requested for: " + symbolId);
-        queuePreviewRequest(symbolId, previewDocument, webView, true, browserState);
-      } else if (message.startsWith('get-preview:')) {
-        _lastForegroundPreviewAt = Date.now();
-        // Generate list thumbnails in background queue
-        const symbolId = message.substring(12);
+        queuePreviewRequest(symbolId, previewDocument, webView, true, browserState, request);
+      } else if (bridgeMessage.startsWith('get-preview:')) {
+        // Render only the requested row; the UI asks for additional rows while idle.
+        const request = parsePreviewRequestPayload(bridgeMessage.substring(12));
+        const symbolId = request.id;
         const previewDocument = browserState.document;
-        if (!previewDocument) return;
+        if (!previewDocument || !symbolId) return;
         verbosePreviewLog("Preview requested for: " + symbolId);
-        queuePreviewRequest(symbolId, previewDocument, webView, false, browserState);
-      } else if (message.startsWith('close-browser:')) {
+        queuePreviewRequest(symbolId, previewDocument, webView, false, browserState, request);
+      } else if (bridgeMessage.startsWith('close-browser-animated:')) {
         try {
           const stateDocument = browserState.document;
           if (stateDocument) {
-            setSavedUiState(stateDocument, decodeURIComponent(message.substring(14)));
+            const payload = bridgeMessage.substring('close-browser-animated:'.length);
+            setSavedUiState(stateDocument, decodeURIComponent(payload));
+          }
+        } catch (e) {}
+        setTimeout(function() {
+          hideBrowserWindow(browserState, true);
+        }, 0);
+      } else if (bridgeMessage.startsWith('close-browser:')) {
+        try {
+          const stateDocument = browserState.document;
+          if (stateDocument) {
+            setSavedUiState(stateDocument, decodeURIComponent(bridgeMessage.substring(14)));
           }
         } catch (e) {}
         setTimeout(function() {
           hideBrowserWindow(browserState);
         }, 0);
-      } else if (message.startsWith('save-ui-state:')) {
+      } else if (bridgeMessage.startsWith('save-ui-state:')) {
         const stateDocument = browserState.document;
         if (stateDocument) {
-          setSavedUiState(stateDocument, decodeURIComponent(message.substring(14)));
+          setSavedUiState(stateDocument, decodeURIComponent(bridgeMessage.substring(14)));
         }
-      } else if (message.startsWith('dismiss-update-notice:')) {
-        dismissUpdateNotice(message.substring(22));
-      } else if (message === 'close') {
+      } else if (bridgeMessage.startsWith('dismiss-update-notice:')) {
+        dismissUpdateNotice(bridgeMessage.substring(22));
+      } else if (bridgeMessage === 'close') {
         setTimeout(function() {
           hideBrowserWindow(browserState);
         }, 0);
-      } else if (message.startsWith('set-hotkey:')) {
+      } else if (bridgeMessage.startsWith('set-hotkey:')) {
         // Payload: "keyCode,modifiers" (e.g. "11,2304")
         try {
-          const payload = message.substring(11);
+          const payload = bridgeMessage.substring(11);
           const parts = payload.split(',');
           const keyCode = parseInt(parts[0], 10);
           const modifiers = parseInt(parts[1], 10);
           if (Number.isFinite(keyCode) && Number.isFinite(modifiers)) {
-            const newHk = { keyCode: keyCode, modifiers: modifiers };
-            storeHotkey(newHk);
-            reRegisterHotkey(newHk);
-            UI.message("Shortcut updated");
+            handleRecordedHotkey(keyCode, modifiers);
           }
         } catch (e) {
           log("[HotkeyAgent] set-hotkey parse error: " + e);
         }
-      } else if (message === 'reset-hotkey') {
+      } else if (bridgeMessage === 'reset-hotkey') {
         storeHotkey(DEFAULT_HOTKEY);
         reRegisterHotkey(DEFAULT_HOTKEY);
         // Push new value to UI so the displayed shortcut updates immediately.
@@ -2109,22 +2668,34 @@ function onRun(context) {
           "window.applyCurrentHotkey && window.applyCurrentHotkey("
           + DEFAULT_HOTKEY.keyCode + "," + DEFAULT_HOTKEY.modifiers + ");");
         UI.message("Shortcut reset to default");
-      } else if (message === 'request-hotkey') {
+      } else if (bridgeMessage === 'request-hotkey') {
         // UI asks for the current binding to display.
         const hk = getStoredHotkey();
         evaluateWebScriptSafely(browserState.webView,
           "window.applyCurrentHotkey && window.applyCurrentHotkey(" + hk.keyCode + "," + hk.modifiers + ");");
-      } else if (message === 'pause-hotkey') {
-        // UI is in record mode — temporarily unregister so the existing
-        // binding doesn't swallow keystrokes before the WebView sees them.
+      } else if (bridgeMessage === 'start-hotkey-recording' || bridgeMessage === 'pause-hotkey') {
+        // Reuse the shared Startup agent. Module globals are per Sketch plugin
+        // invocation, so a command-local instance can be a failed duplicate;
+        // pausing only that duplicate leaves the real shortcut active.
+        hotkeyAgent = hotkeyAgent || getThreadDictionaryObject(HOTKEY_AGENT_INSTANCE_KEY);
+        hotkeyDelegate = hotkeyDelegate || getThreadDictionaryObject(HOTKEY_AGENT_DELEGATE_KEY);
         if (hotkeyAgent) {
-          try { hotkeyAgent.unregister(); } catch (e) {}
-          log("[HotkeyAgent] paused (record mode)");
+          try {
+            hotkeyAgent.unregister();
+            if (hotkeyAgent.beginRecording) hotkeyAgent.beginRecording();
+            log("[HotkeyAgent] paused; native recorder started");
+          } catch (e) {
+            log("[HotkeyAgent] recorder start failed: " + e);
+          }
+        } else {
+          log("[HotkeyAgent] recorder start failed: no shared agent");
         }
-      } else if (message === 'resume-hotkey') {
+      } else if (bridgeMessage === 'resume-hotkey') {
         // UI exited record mode without saving — re-register the stored
         // binding. (Successful record sends set-hotkey, which re-registers
         // on its own.)
+        hotkeyAgent = hotkeyAgent || getThreadDictionaryObject(HOTKEY_AGENT_INSTANCE_KEY);
+        if (hotkeyAgent && hotkeyAgent.endRecording) hotkeyAgent.endRecording();
         const hk = getStoredHotkey();
         reRegisterHotkey(hk);
       }
@@ -2137,28 +2708,39 @@ function onRun(context) {
 
   contentView.addSubview(webView);
   webViewWindow.center();
+  webViewWindow.setAlphaValue_(0);
+  webViewWindow.fadeIn();
   webViewWindow.makeKeyAndOrderFront(nil);
   
   // Make webView first responder for keyboard input
   webViewWindow.makeFirstResponder(webView);
 
-  // Start loading immediately; UI side already handles DOM-not-ready retries.
+  // Focus immediately, then perform Sketch's document/library API work after
+  // the panel's first paint and entrance animation.
   focusBrowserSearch(webView, 'smart');
-  loadSymbolsIntoBrowser(browserState, { showLoader: true });
+  setTimeout(function() {
+    if (browserState.closed || !browserState.isVisible) return;
+    const activeDocument = getActiveDocument();
+    if (!activeDocument || getDocumentIdentifier(activeDocument) !== currentDocId) return;
+    loadSymbolsIntoBrowser(browserState, {
+      showLoader: true,
+      preserveCurrentContents: true
+    });
+  }, INITIAL_BROWSER_WORK_DELAY_MS);
 
-  // L1 verify scan only runs when this is a cache hit (scheduled from inside
-  // loadSymbolsIntoBrowser's cache-hit branch). Don't unconditionally trigger
-  // it here — on a fresh window the load already runs a full scan, and a
-  // second scan 1.5s later just costs another 3-4 seconds of main-thread
-  // blocking without producing anything new.
+  setTimeout(function() {
+    if (!hotkeyAgent) setupHotkeyAgent(context);
+    if (!previewAgent) setupPreviewAgent(context);
+    setPreviewAgentBusy(true);
+  }, INITIAL_BROWSER_WORK_DELAY_MS);
 
   startDocumentSwitchWatcher(browserState);
 
 }
 
 function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
-  const enabledLibraries = getEnabledLibraries();
-  const localSymbols = document.getSymbols();
+  const enabledLibraries = getEnabledLibraries(document);
+  const localSymbols = getDocumentSymbolMetadata(document);
   const symbols = [];
   const existingSymbolNames = new Set();
   // Also track ids that the document already covers (live import or unlinked-
@@ -2170,6 +2752,7 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
   const libraryRefById = {};
   const libraryBySymbolName = {};
   const libraryRefsByLibraryId = {};
+  const libraryRefsLoadedById = {};
   const libraryEntries = [];
   const effectiveScanConfig = scanConfig || {};
   const symbolBatchSize = Math.max(1, Number(effectiveScanConfig.symbolBatchSize) || SYMBOL_SCAN_BATCH_SIZE);
@@ -2191,11 +2774,17 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
     });
 
     symbolLookupCache.docId = getDocumentIdentifier(document);
-    symbolLookupCache.localById = {};
-    localSymbols.forEach(function(symbolMaster) {
-      symbolLookupCache.localById[symbolMaster.id] = symbolMaster;
-    });
+    symbolLookupCache.localById = createLazyLocalSymbolLookup(localSymbols);
     symbolLookupCache.libraryRefById = libraryRefById;
+    const libraryIdsByComponentId = {};
+    Object.keys(librarySymbolMap).forEach(function(id) {
+      const entry = librarySymbolMap[id];
+      if (entry && entry.library !== null && entry.library !== undefined) {
+        libraryIdsByComponentId[String(id)] = String(entry.library);
+      }
+    });
+    symbolLookupCache.libraryIdById = libraryIdsByComponentId;
+    symbolLookupCache.libraryRefsLoadedById = libraryRefsLoadedById;
 
     log("Collected " + symbols.length + " symbols from " + localSymbols.length + " local symbols and " + enabledLibraries.length + " libraries");
     callback(JSON.stringify(symbols), symbols.length, {
@@ -2203,7 +2792,8 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
       libraryEntries: libraryEntries,
       librarySymbolMap: librarySymbolMap,
       libraryBySymbolName: libraryBySymbolName,
-      libraryRefById: libraryRefById
+      libraryRefById: libraryRefById,
+      libraryRefsLoadedById: libraryRefsLoadedById
     });
   }
 
@@ -2263,7 +2853,7 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
     const endIndex = Math.min(startIndex + symbolBatchSize, localSymbols.length);
 
     for (let i = startIndex; i < endIndex; i++) {
-      const symbolMaster = localSymbols[i];
+      const symbolMaster = sketch.fromNative(localSymbols[i].sketchObject);
       const symbolName = symbolMaster.name;
       const localIdStr = String(symbolMaster.id);
       existingSymbolNames.add(symbolName);
@@ -2382,15 +2972,12 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
     while (libraryIndex < enabledLibraries.length && processedLibraries < libraryBatchSize) {
       const library = enabledLibraries[libraryIndex];
 
-      // L2 cache hit: use the lean metadata. Live refs are NOT populated here
-      // — they'll be lazily refilled by startLibraryRefsWarmup so previews can
-      // resolve to MSShareableObjectReference objects. The downstream code
-      // only reads .id and .name from libraryRefsByLibraryId[], so feeding
-      // it the lean cache entries is correct.
+      // Persistent list metadata avoids enumerating live references here.
+      // Live references are resolved only when a requested component needs a
+      // fresh render.
       const cachedLib = getCachedLibrarySymbols(library);
       if (cachedLib) {
         const leanRefs = cachedLib.symbols;
-        log("[Diag] L2 hit  '" + library.name + "' libId=" + library.id + " mtime=" + getLibraryVersionTag(library) + " refs=" + leanRefs.length);
         libraryRefsByLibraryId[getLibraryCacheKey(library)] = leanRefs;
         leanRefs.forEach(function(meta) {
           if (!libraryBySymbolName[meta.name]) {
@@ -2408,8 +2995,8 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
       } else {
         try {
           const refs = library.getImportableSymbolReferencesForDocument(document);
-          log("[Diag] L2 miss '" + library.name + "' libId=" + library.id + " mtime=" + getLibraryVersionTag(library) + " refs=" + refs.length + " (live scan)");
           libraryRefsByLibraryId[getLibraryCacheKey(library)] = refs;
+          libraryRefsLoadedById[String(library.id || '')] = true;
           const leanForCache = [];
           refs.forEach(function(ref) {
             if (!libraryBySymbolName[ref.name]) {
@@ -2447,7 +3034,7 @@ function getSymbolsJsonAsync(document, callback, shouldContinue, scanConfig) {
 }
 
 function getSymbolsJsonFromLocalChangesAsync(document, libraryScanData, callback, shouldContinue, scanConfig) {
-  const localSymbols = document.getSymbols();
+  const localSymbols = getDocumentSymbolMetadata(document);
   const symbols = [];
   const existingSymbolNames = new Set();
   const effectiveLibraryScanData = libraryScanData || {};
@@ -2455,6 +3042,7 @@ function getSymbolsJsonFromLocalChangesAsync(document, libraryScanData, callback
   const libraryBySymbolName = effectiveLibraryScanData.libraryBySymbolName || {};
   const libraryEntries = Array.isArray(effectiveLibraryScanData.libraryEntries) ? effectiveLibraryScanData.libraryEntries : [];
   const libraryRefById = effectiveLibraryScanData.libraryRefById || {};
+  const libraryRefsLoadedById = effectiveLibraryScanData.libraryRefsLoadedById || {};
   const effectiveScanConfig = scanConfig || {};
   const symbolBatchSize = Math.max(1, Number(effectiveScanConfig.symbolBatchSize) || SYMBOL_SCAN_BATCH_SIZE);
 
@@ -2472,11 +3060,17 @@ function getSymbolsJsonFromLocalChangesAsync(document, libraryScanData, callback
     });
 
     symbolLookupCache.docId = getDocumentIdentifier(document);
-    symbolLookupCache.localById = {};
-    localSymbols.forEach(function(symbolMaster) {
-      symbolLookupCache.localById[symbolMaster.id] = symbolMaster;
-    });
+    symbolLookupCache.localById = createLazyLocalSymbolLookup(localSymbols);
     symbolLookupCache.libraryRefById = libraryRefById;
+    const libraryIdsByComponentId = {};
+    Object.keys(librarySymbolMap).forEach(function(id) {
+      const entry = librarySymbolMap[id];
+      if (entry && entry.library !== null && entry.library !== undefined) {
+        libraryIdsByComponentId[String(id)] = String(entry.library);
+      }
+    });
+    symbolLookupCache.libraryIdById = libraryIdsByComponentId;
+    symbolLookupCache.libraryRefsLoadedById = libraryRefsLoadedById;
 
     log("Rebuilt local symbols using cached library index: " + symbols.length + " total symbols");
     callback(JSON.stringify(symbols), symbols.length);
@@ -2525,7 +3119,7 @@ function getSymbolsJsonFromLocalChangesAsync(document, libraryScanData, callback
     const endIndex = Math.min(startIndex + symbolBatchSize, localSymbols.length);
 
     for (let i = startIndex; i < endIndex; i++) {
-      const symbolMaster = localSymbols[i];
+      const symbolMaster = sketch.fromNative(localSymbols[i].sketchObject);
       const symbolName = symbolMaster.name;
       existingSymbolNames.add(symbolName);
 
@@ -2640,10 +3234,10 @@ function evaluateWebScriptSafely(webView, script) {
 function gotoSymbolSource(symbolId, document, browserState) {
   // 1) Local master in the current doc — fastest path.
   try {
-    const locals = document.getSymbols();
+    const locals = getDocumentSymbolMetadata(document);
     for (let i = 0; i < locals.length; i++) {
       if (locals[i].id === symbolId) {
-        const master = locals[i];
+        const master = sketch.fromNative(locals[i].sketchObject);
         navigateToMasterInDocument(master, document);
         try { hideBrowserWindow(browserState); } catch (e) {}
         UI.message("→ " + master.name);
@@ -2689,7 +3283,7 @@ function gotoSymbolSource(symbolId, document, browserState) {
                   return;
                 }
               }
-              UI.message("⚠ Symbol not found in library doc");
+              UI.message("⚠ Component not found in library document");
             } catch (e) {
               log("[Goto] navigate in lib doc failed: " + e);
             }
@@ -2702,7 +3296,7 @@ function gotoSymbolSource(symbolId, document, browserState) {
     log("[Goto] library lookup failed: " + e);
   }
 
-  UI.message("⚠ Symbol source not found");
+  UI.message("⚠ Component source not found");
 }
 
 function navigateToMasterInDocument(master, document) {
@@ -2745,11 +3339,11 @@ function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
   let symbolMaster = null;
   
   // Try to find in local symbols by ID
-  const localSymbols = document.getSymbols();
+  const localSymbols = getDocumentSymbolMetadata(document);
   log("Checking " + localSymbols.length + " local symbols by ID...");
   for (let i = 0; i < localSymbols.length; i++) {
     if (localSymbols[i].id === symbolId) {
-      symbolMaster = localSymbols[i];
+      symbolMaster = sketch.fromNative(localSymbols[i].sketchObject);
       log("Found by ID: " + symbolMaster.name);
       break;
     }
@@ -2795,11 +3389,11 @@ function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
       // If we found the name, look for local symbol with same name
       if (symbolName) {
         log("Looking for local copy of: " + symbolName);
-        const localSymbols = document.getSymbols();
+        const localSymbols = getDocumentSymbolMetadata(document);
         log("Current local symbols count: " + localSymbols.length);
         for (let i = 0; i < localSymbols.length; i++) {
           if (localSymbols[i].name === symbolName) {
-            symbolMaster = localSymbols[i];
+            symbolMaster = sketch.fromNative(localSymbols[i].sketchObject);
             log("Found local copy: " + symbolMaster.id);
             break;
           }
@@ -2856,13 +3450,13 @@ function insertSymbol(symbolId, document, replace, targetLayers, preserveDims) {
       // schedule a silent refresh so the UI updates on its own.
       log("[Stale] Insert lookup failed id=" + symbolId + " — L2 said '" + owner.name + "', purging cache");
       invalidateLibraryCachesByKey(owner.key);
-      UI.message("Symbol no longer in library — refreshing list");
+      UI.message("Component no longer in library — refreshing list");
     } else {
       // Ghost: not in any L2 entry — L1 has a stale entry from before a
       // library change that didn't bump lastModifiedAt.
       log("[Ghost] Insert lookup failed id=" + symbolId + " — no L2 owner, refreshing list");
       invalidateCurrentDocL1AndRefresh();
-      UI.message("Symbol no longer available — refreshing list");
+      UI.message("Component no longer available — refreshing list");
     }
     return;
   }
@@ -2990,32 +3584,22 @@ const previewQueue = [];
 let isProcessingPreview = false;
 const inFlightPreviewBySymbol = {};
 
-function sendPreviewToUI(webView, symbolId, preview) {
-  if (!webView || !symbolId || !preview) return;
-  webView.windowScriptObject().evaluateWebScript_('updateSymbolPreview("' + symbolId + '", "' + preview + '");');
+function parsePreviewRequestPayload(rawPayload) {
+  let decoded = String(rawPayload || '');
+  try { decoded = decodeURIComponent(decoded); } catch (e) {}
+  try {
+    const request = JSON.parse(decoded);
+    if (request && request.id) {
+      request.id = String(request.id);
+      return request;
+    }
+  } catch (e) {}
+  return { id: decoded };
 }
 
-function generateAndCachePreview(symbolId, document) {
-  if (!symbolId) return null;
-
-  const cached = getCachedPreview(symbolId);
-  if (cached) return cached;
-
-  if (inFlightPreviewBySymbol[symbolId]) {
-    return null;
-  }
-
-  inFlightPreviewBySymbol[symbolId] = true;
-  try {
-    const generated = generatePreviewForSymbolSync(symbolId, document);
-    if (generated) {
-      setCachedPreview(symbolId, generated);
-      return generated;
-    }
-    return null;
-  } finally {
-    delete inFlightPreviewBySymbol[symbolId];
-  }
+function sendPreviewToUI(webView, symbolId, preview) {
+  if (!webView || !symbolId || !preview) return;
+  evaluateWebScriptSafely(webView, 'window.updateSymbolPreview(' + JSON.stringify(String(symbolId)) + ', ' + JSON.stringify(String(preview)) + ', ' + JSON.stringify(previewVersionTagBySymbol[String(symbolId)] || '') + ');');
 }
 
 function processPreviewQueue() {
@@ -3023,7 +3607,7 @@ function processPreviewQueue() {
   
   isProcessingPreview = true;
   const item = previewQueue.shift();
-  const { symbolId, document, requestDocId, webView, priority, browserState, reloadToken } = item;
+  const { symbolId, document, requestDocId, webView, priority, browserState, reloadToken, componentInfo } = item;
 
   if (browserState && (browserState.closed || browserState.reloadToken !== reloadToken || browserState.docId !== requestDocId)) {
     isProcessingPreview = false;
@@ -3032,17 +3616,24 @@ function processPreviewQueue() {
   }
   
   verbosePreviewLog("Processing preview for: " + symbolId + " (priority: " + priority + ")");
+  pendingForegroundPreviewIDs.add(String(symbolId));
   
-  // Generate preview
-  const preview = generateAndCachePreview(symbolId, document);
-  if (preview) {
-    sendPreviewToUI(webView, symbolId, preview);
-    verbosePreviewLog("Preview sent to UI for: " + symbolId);
-  } else {
-    verbosePreviewLog("Preview generation failed for: " + symbolId);
+  let handedOff = false;
+  try {
+    if (previewAgent && typeof previewAgent.requestPreviewForSymbolID_ === 'function') {
+      handedOff = !!previewAgent.requestPreviewForSymbolID_(String(symbolId));
+    }
+  } catch (e) {
+    log("[PreviewAgent] on-demand request failed id=" + symbolId + ": " + e);
   }
-  
-  // Tiny yield between background items keeps UI responsive without adding visible lag.
+  if (handedOff) {
+    verbosePreviewLog("Preview handed to background agent for: " + symbolId);
+  } else {
+    log("[PreviewAgent] no background source queued for component id=" + symbolId
+      + (componentInfo && componentInfo.library === null ? " (local or unsaved component)" : ""));
+  }
+
+  // Keep alert-to-plugin dispatches short; all rendering happens in sketchtool.
   const delay = priority ? 0 : PREVIEW_QUEUE_DELAY_MS;
   setTimeout(function() {
     isProcessingPreview = false;
@@ -3050,11 +3641,18 @@ function processPreviewQueue() {
   }, delay);
 }
 
-function queuePreviewRequest(symbolId, document, webView, priority, browserState) {
+function queuePreviewRequest(symbolId, document, webView, priority, browserState, componentInfo) {
   const reloadToken = browserState ? browserState.reloadToken : 0;
   const requestDocId = getDocumentIdentifier(document) || (browserState ? browserState.docId : null);
+  const row = componentInfo && typeof componentInfo === 'object' ? componentInfo : null;
 
-  // 1) Session (in-memory) cache — fastest path
+  // The hotkey and WebView delegate may belong to different CocoaScript
+  // contexts. Honor the UI's current revision before using this context's LRU.
+  if (row && row.previewVersionTag && previewVersionTagBySymbol[String(symbolId)] !== String(row.previewVersionTag)) {
+    previewVersionTagBySymbol[String(symbolId)] = String(row.previewVersionTag);
+    previewMemoryCache.delete(String(symbolId));
+  }
+
   const cached = getCachedPreview(symbolId);
   if (cached) {
     if (!browserState || (!browserState.closed && browserState.reloadToken === reloadToken && browserState.docId === requestDocId)) {
@@ -3063,32 +3661,52 @@ function queuePreviewRequest(symbolId, document, webView, priority, browserState
     return;
   }
 
-  // 2) Disk cache fast path — only use the lookup cache that's ALREADY
-  // warm. The previous version called ensureSymbolLookupCache(document) which
-  // triggers a synchronous rebuildSymbolLookupCache (iterates every library's
-  // getImportableSymbolReferencesForDocument). On a fresh Run-script context
-  // that's 3-4 seconds of main-thread blocking — felt as a complete Sketch
-  // freeze right after the plugin opened. The async startLibraryRefsWarmup
-  // path already populates symbolLookupCache for us; this fast path just
-  // capitalises on it when it's ready.
+  // A row already identifies its owning library. Check the disk thumbnail with
+  // that library's version before asking Sketch for live references.
   try {
-    const localSymbol = symbolLookupCache.localById[symbolId] || null;
-    const libraryRef = symbolLookupCache.libraryRefById[symbolId] || null;
-    if (localSymbol || libraryRef) {
-      const versionTag = getSymbolVersionTag(localSymbol, libraryRef, symbolId);
-      if (versionTag) {
-        const diskCached = readDiskPreview(symbolId, versionTag);
-        if (diskCached) {
-          setCachedPreview(symbolId, diskCached);
-          if (!browserState || (!browserState.closed && browserState.reloadToken === reloadToken && browserState.docId === requestDocId)) {
-            sendPreviewToUI(webView, symbolId, diskCached);
-          }
-          return;
+    let versionTag = String((row && row.previewVersionTag) || previewVersionTagBySymbol[String(symbolId)] || '');
+    if (!versionTag && row && row.library !== null && row.library !== undefined && row.library !== '') {
+      const libraryId = String(row.library);
+      symbolLookupCache.libraryIdById[String(symbolId)] = libraryId;
+      const library = getEnabledLibraryById(libraryId, document);
+      if (library) {
+        const libraryVersion = getLibraryVersionTag(library);
+        if (libraryVersion) versionTag = 'lib:' + libraryVersion;
+      }
+    } else if (!versionTag && row && row.library === null) {
+      // Show the durable local thumbnail immediately while the chunked content
+      // check runs. applyPreviewVersionTags replaces it if the model changed.
+      const persisted = readPreviewDiskVersionTag(String(symbolId));
+      const qualityPrefix = PREVIEW_CACHE_QUALITY_TAG + ':';
+      if (persisted && persisted.indexOf(qualityPrefix + 'local-json-v1:') === 0) {
+        versionTag = persisted.slice(qualityPrefix.length);
+        previewVersionTagBySymbol[String(symbolId)] = versionTag;
+      }
+    } else if (!versionTag && row && row.library !== undefined) {
+      ensureSymbolLookupCache(document);
+      const localSymbol = symbolLookupCache.localById[String(symbolId)] || null;
+      const libraryRef = symbolLookupCache.libraryRefById[String(symbolId)] || null;
+      if (localSymbol || libraryRef) versionTag = getSymbolVersionTag(localSymbol, libraryRef, String(symbolId), document);
+    } else if (!versionTag) {
+      // Compatibility for an older WebView that sends only an ID.
+      ensureSymbolLookupCache(document);
+      const localSymbol = symbolLookupCache.localById[String(symbolId)] || null;
+      const libraryRef = symbolLookupCache.libraryRefById[String(symbolId)] || null;
+      if (localSymbol || libraryRef) versionTag = getSymbolVersionTag(localSymbol, libraryRef, String(symbolId), document);
+    }
+
+    if (versionTag) {
+      const diskCached = readDiskPreview(String(symbolId), versionTag);
+      if (diskCached) {
+        setCachedPreview(symbolId, diskCached);
+        if (!browserState || (!browserState.closed && browserState.reloadToken === reloadToken && browserState.docId === requestDocId)) {
+          sendPreviewToUI(webView, symbolId, diskCached);
         }
+        return;
       }
     }
   } catch (e) {
-    // fall through to the queued render path
+    // Enqueue a background export when cache metadata is incomplete.
   }
 
   const existingIndex = previewQueue.findIndex(item =>
@@ -3102,236 +3720,16 @@ function queuePreviewRequest(symbolId, document, webView, priority, browserState
     if (priority && !previewQueue[existingIndex].priority) {
       const existingItem = previewQueue.splice(existingIndex, 1)[0];
       existingItem.priority = true;
+      existingItem.componentInfo = row;
       previewQueue.unshift(existingItem);
     }
     return;
   }
 
-  const queueItem = { symbolId, document, requestDocId, webView, priority: priority === true, browserState, reloadToken };
-  if (priority) {
-    previewQueue.unshift(queueItem);
-  } else {
-    previewQueue.push(queueItem);
-  }
+  const queueItem = { symbolId, document, requestDocId, webView, priority: priority === true, browserState, reloadToken, componentInfo: row };
+  if (priority) previewQueue.unshift(queueItem);
+  else previewQueue.push(queueItem);
   processPreviewQueue();
-}
-
-function generatePreviewForSymbolSync(symbolId, document) {
-  ensureSymbolLookupCache(document);
-
-  let localSymbol = symbolLookupCache.localById[symbolId] || null;
-  let libraryRef = symbolLookupCache.libraryRefById[symbolId] || null;
-
-  // Fallback scan if cache misses (can happen when symbols changed after initial load)
-  if (!localSymbol) {
-    const localSymbols = document.getSymbols();
-    for (let i = 0; i < localSymbols.length; i++) {
-      if (localSymbols[i].id === symbolId) {
-        localSymbol = localSymbols[i];
-        symbolLookupCache.localById[symbolId] = localSymbol;
-        break;
-      }
-    }
-  }
-
-  if (!libraryRef) {
-    try {
-      const libraries = sketch.getLibraries();
-      for (let i = 0; i < libraries.length; i++) {
-        const library = libraries[i];
-        if (!library.enabled) continue;
-        const refs = library.getImportableSymbolReferencesForDocument(document);
-        for (let j = 0; j < refs.length; j++) {
-          if (refs[j].id === symbolId) {
-            libraryRef = refs[j];
-            symbolLookupCache.libraryRefById[symbolId] = libraryRef;
-            symbolLookupCache.libraryIdById[symbolId] = String(library.id || '');
-            break;
-          }
-        }
-        if (libraryRef) break;
-      }
-    } catch (e) {
-      log("Library ref fallback scan failed: " + e);
-    }
-  }
-
-  // Disk-cache fast path: if the symbol hasn't changed since we last rendered
-  // it, return the cached PNG directly. Round trip cost: ~1 NSData read +
-  // base64 encode (sub-millisecond).
-  const versionTag = getSymbolVersionTag(localSymbol, libraryRef, symbolId);
-  if (versionTag) {
-    const cached = readDiskPreview(symbolId, versionTag);
-    if (cached) return cached;
-  }
-
-  const preview = generateSymbolPreview(localSymbol, libraryRef, PREVIEW_RENDER_SIZE, document, symbolId);
-  if (preview) {
-    if (versionTag) writeDiskPreview(symbolId, preview, versionTag);
-    return preview;
-  }
-
-  // Live libraries don't have this symbol but our cache claims they do →
-  // the cache is stale. Find which L2 entry is lying, drop it (and L1),
-  // so the next plugin open does a fresh scan. Sketch's
-  // library.lastModifiedAt is unreliable for some library updates.
-  const owner = findL2EntryForSymbolId(symbolId);
-  if (owner) {
-    log("[Stale] Preview lookup failed id=" + symbolId + " — L2 said '" + owner.name + "', purging cache");
-    invalidateLibraryCachesByKey(owner.key);
-  } else {
-    // Ghost case: symbol exists only in L1, no L2 entry, no live ref.
-    log("[Ghost] Preview unavailable id=" + symbolId + " — not in any library, dropping doc's L1");
-    invalidateCurrentDocL1AndRefresh();
-  }
-  return null;
-}
-
-function generateSymbolPreview(symbolMaster, symbolReference, size, document, symbolId) {
-  try {
-    if (!symbolMaster && !symbolReference) {
-      return null;
-    }
-
-    // 1) Fast path via private/native preview APIs (no import, no file IO)
-    const nativeSymbolMaster = symbolMaster ? (symbolMaster.sketchObject || symbolMaster) : null;
-    const nativeSymbolReference = symbolReference ? (symbolReference.sketchObject || symbolReference) : null;
-    const privatePreview = generatePreviewUsingPrivateAPI(nativeSymbolMaster, nativeSymbolReference, size);
-    if (privatePreview) {
-      return privatePreview;
-    }
-
-    // 2) Try resolving a master from the reference (without importing)
-    let resolvedNativeMaster = nativeSymbolMaster;
-    if (!resolvedNativeMaster && nativeSymbolReference) {
-      resolvedNativeMaster = resolveNativeMasterFromReference(nativeSymbolReference);
-    }
-
-    // 3) Export fallback (in-memory first, then file fallback)
-    const exportCandidate = symbolMaster || resolvedNativeMaster;
-    if (exportCandidate) {
-      const exportedPreview = exportSymbolToDataUrl(exportCandidate);
-      if (exportedPreview) return exportedPreview;
-    }
-
-    // 4) Last-resort: import once per symbol for preview, then export
-    if (!exportCandidate && symbolReference && symbolId && !importPreviewFallbackTried[symbolId]) {
-      importPreviewFallbackTried[symbolId] = true;
-      try {
-        log("Preview fallback import for symbol: " + symbolId);
-        const imported = symbolReference.import();
-        if (imported) {
-          invalidateSymbolLookupCache();
-          invalidateSymbolsListCache();
-          const importedPreview = exportSymbolToDataUrl(imported);
-          if (importedPreview) return importedPreview;
-        }
-      } catch (e) {
-        log("Preview fallback import failed: " + e);
-      }
-    }
-    
-    return null;
-  } catch (e) {
-    log("Preview error: " + e);
-    return null;
-  }
-}
-
-function resolveNativeMasterFromReference(nativeSymbolReference) {
-  if (!nativeSymbolReference) return null;
-
-  try {
-    const selector = NSSelectorFromString("symbolMaster");
-    if (nativeSymbolReference.respondsToSelector && nativeSymbolReference.respondsToSelector(selector)) {
-      if (typeof nativeSymbolReference.symbolMaster === 'function') {
-        const master = nativeSymbolReference.symbolMaster();
-        if (master) return master;
-      }
-    }
-  } catch (e) {
-    log("resolveNativeMasterFromReference failed: " + e);
-  }
-
-  return null;
-}
-
-// Mocha wraps native NSException as a JS Error whose .toString() loses the
-// most useful field — the NSException's -reason. Probe a few common spots
-// where the underlying exception lands so we get an actionable log line
-// instead of "Error: An Obj-C exception occurred."
-function describeObjcException(e, symbolLike) {
-  const parts = [String(e)];
-  try {
-    if (e && e.reason) parts.push("reason=" + e.reason);
-    if (e && e.name) parts.push("name=" + e.name);
-    if (e && e.nativeException) {
-      try { parts.push("native.reason=" + e.nativeException.reason()); } catch (_) {}
-      try { parts.push("native.name=" + e.nativeException.name()); } catch (_) {}
-    }
-  } catch (_) {}
-  try {
-    const native = symbolLike && (symbolLike.sketchObject || symbolLike);
-    if (native && typeof native.class === 'function') {
-      parts.push("class=" + native.class());
-    }
-    if (native && typeof native.isForeign === 'function') {
-      parts.push("isForeign=" + native.isForeign());
-    }
-    if (native && typeof native.objectID === 'function') {
-      parts.push("objectID=" + native.objectID());
-    }
-  } catch (_) {}
-  return parts.join(" | ");
-}
-
-function exportSymbolToDataUrl(symbolLike) {
-  const exportScale = getExportScaleForSymbol(symbolLike, PREVIEW_RENDER_SIZE);
-
-  // In-memory export (preferred)
-  try {
-    const exportedData = sketch.export(symbolLike, {
-      output: false,
-      formats: "png",
-      scales: exportScale,
-      trimmed: true
-    });
-    const dataUrl = binaryToDataUrl(exportedData);
-    if (dataUrl) return dataUrl;
-  } catch (e) {
-    log("In-memory export failed: " + describeObjcException(e, symbolLike));
-  }
-
-  // File-based fallback for compatibility with older API/runtime behavior
-  try {
-    const tempDir = NSTemporaryDirectory();
-    const fileName = "preview_" + Date.now() + "_" + Math.floor(Math.random() * 100000) + ".png";
-    const filePath = tempDir.stringByAppendingPathComponent(fileName);
-    sketch.export(symbolLike, {
-      output: tempDir,
-      filename: fileName,
-      formats: "png",
-      scales: exportScale,
-      trimmed: true,
-      overwriting: true
-    });
-
-    const fileManager = NSFileManager.defaultManager();
-    if (fileManager.fileExistsAtPath(filePath)) {
-      const imageData = NSData.dataWithContentsOfFile(filePath);
-      if (imageData && imageData.length() > 0) {
-        const base64String = imageData.base64EncodedStringWithOptions(0);
-        try {
-          fileManager.removeItemAtPath_error(filePath, null);
-        } catch (cleanupErr) {}
-        return "data:image/png;base64," + base64String;
-      }
-    }
-  } catch (e) {
-    log("File export fallback failed: " + describeObjcException(e, symbolLike));
-  }
-
-  return null;
 }
 
 function getExportScaleForSymbol(symbolLike, targetSize) {
@@ -3345,7 +3743,7 @@ function getExportScaleForSymbol(symbolLike, targetSize) {
   if (!isFinite(maxDim) || maxDim <= 0) return fallbackScale;
 
   const rawScale = targetSize / maxDim;
-  const clampedScale = Math.max(0.05, Math.min(rawScale, 4));
+  const clampedScale = Math.max(0.05, Math.min(rawScale, 8));
   if (!isFinite(clampedScale) || clampedScale <= 0) return fallbackScale;
 
   return String(Math.round(clampedScale * 1000) / 1000);
@@ -3381,201 +3779,4 @@ function getSymbolDimensions(symbolLike) {
   }
 
   return { width, height };
-}
-
-function generatePreviewUsingPrivateAPI(nativeSymbolMaster, nativeSymbolReference, size) {
-  const colorSpace = getPreviewColorSpace();
-  const previewSize = NSMakeSize(size, size);
-
-  // Try existing reference first (works for library symbols without importing)
-  const referencePreview = previewFromNativeObject(nativeSymbolReference, previewSize, colorSpace);
-  if (referencePreview) return referencePreview;
-
-  // Try symbol master directly
-  const masterPreview = previewFromNativeObject(nativeSymbolMaster, previewSize, colorSpace);
-  if (masterPreview) return masterPreview;
-
-  // Try creating a shareable reference from local symbol master and preview through that
-  if (nativeSymbolMaster) {
-    const generatedRef = makeShareableReferenceFromMaster(nativeSymbolMaster);
-    const generatedRefPreview = previewFromNativeObject(generatedRef, previewSize, colorSpace);
-    if (generatedRefPreview) return generatedRefPreview;
-  }
-
-  return null;
-}
-
-function getPreviewColorSpace() {
-  try {
-    if (NSColorSpace && NSColorSpace.sRGBColorSpace) {
-      return NSColorSpace.sRGBColorSpace();
-    }
-  } catch (e) {}
-
-  try {
-    if (NSColorSpace && NSColorSpace.deviceRGBColorSpace) {
-      return NSColorSpace.deviceRGBColorSpace();
-    }
-  } catch (e) {}
-
-  return null;
-}
-
-function makeShareableReferenceFromMaster(nativeSymbolMaster) {
-  try {
-    if (typeof MSShareableObjectReference === 'undefined' || !nativeSymbolMaster) {
-      return null;
-    }
-
-    const refSelector = NSSelectorFromString("referenceForShareableObject:");
-    if (MSShareableObjectReference.respondsToSelector(refSelector) && MSShareableObjectReference.referenceForShareableObject) {
-      return MSShareableObjectReference.referenceForShareableObject(nativeSymbolMaster);
-    }
-  } catch (e) {
-    log("Failed to create shareable reference: " + e);
-  }
-
-  return null;
-}
-
-function previewFromNativeObject(nativeObject, previewSize, colorSpace) {
-  if (!nativeObject) return null;
-
-  const methods = [
-    {
-      selector: "previewImageOfSize:colorSpace:clippingAsBorder:borderWidth:",
-      method: "previewImageOfSize_colorSpace_clippingAsBorder_borderWidth",
-      args: [previewSize, colorSpace, false, 0],
-      needsTargetResolution: true
-    },
-    {
-      selector: "previewImageForSize:colorSpace:",
-      method: "previewImageForSize_colorSpace",
-      args: [previewSize, colorSpace],
-      needsTargetResolution: true
-    },
-    {
-      selector: "previewImage",
-      method: "previewImage",
-      args: []
-    },
-    {
-      selector: "cachedPreviewImage",
-      method: "cachedPreviewImage",
-      args: []
-    }
-  ];
-
-  for (let i = 0; i < methods.length; i++) {
-    try {
-      const entry = methods[i];
-      const selector = NSSelectorFromString(entry.selector);
-      if (!nativeObject.respondsToSelector || !nativeObject.respondsToSelector(selector)) {
-        continue;
-      }
-      if (typeof nativeObject[entry.method] !== 'function') {
-        continue;
-      }
-
-      const image = nativeObject[entry.method].apply(nativeObject, entry.args);
-      const pixelSize = (previewSize && previewSize.width) ? previewSize.width : 128;
-
-      const maxImageDim = getNSImageMaxDimension(image);
-      const isLastMethod = i === methods.length - 1;
-      if (entry.needsTargetResolution && maxImageDim > 0 && maxImageDim < (pixelSize * 0.9) && !isLastMethod) {
-        continue;
-      }
-
-      const dataUrl = convertNSImageToBase64(image, pixelSize);
-      if (dataUrl) return dataUrl;
-    } catch (e) {
-      log("Private preview method failed (" + methods[i].selector + "): " + e);
-    }
-  }
-
-  return null;
-}
-
-function getNSImageMaxDimension(nsImage) {
-  try {
-    if (!nsImage || typeof nsImage.size !== 'function') return 0;
-    const size = nsImage.size();
-    if (!size) return 0;
-    const width = Number(size.width) || 0;
-    const height = Number(size.height) || 0;
-    return Math.max(width, height);
-  } catch (e) {
-    return 0;
-  }
-}
-
-function binaryToDataUrl(binaryData) {
-  try {
-    let data = binaryData;
-    if (Array.isArray(data)) {
-      data = data[0];
-    }
-    if (!data) return null;
-
-    if (data.base64EncodedStringWithOptions) {
-      return "data:image/png;base64," + data.base64EncodedStringWithOptions(0);
-    }
-
-    if (typeof data.toString === 'function') {
-      const maybeBase64 = data.toString('base64');
-      if (typeof maybeBase64 === 'string' && /^[A-Za-z0-9+/=]+$/.test(maybeBase64)) {
-        return "data:image/png;base64," + maybeBase64;
-      }
-    }
-  } catch (e) {
-    log("Binary conversion failed: " + e);
-  }
-
-  return null;
-}
-
-function convertNSImageToBase64(nsImage, size) {
-  try {
-    if (!nsImage) return null;
-    
-    // Resize image
-    const originalSize = nsImage.size();
-    const maxDim = Math.max(originalSize.width, originalSize.height);
-    const scale = size / maxDim;
-    
-    const newWidth = originalSize.width * scale;
-    const newHeight = originalSize.height * scale;
-    
-    const newSize = NSMakeSize(newWidth, newHeight);
-    const resizedImage = NSImage.alloc().initWithSize(newSize);
-    
-    resizedImage.lockFocus();
-    nsImage.drawInRect_fromRect_operation_fraction_(
-      NSMakeRect(0, 0, newWidth, newHeight),
-      NSMakeRect(0, 0, originalSize.width, originalSize.height),
-      NSCompositeSourceOver,
-      1.0
-    );
-    resizedImage.unlockFocus();
-    
-    // Convert to PNG
-    const imageData = resizedImage.TIFFRepresentation();
-    if (!imageData) return null;
-    
-    const imageRep = NSBitmapImageRep.imageRepWithData(imageData);
-    if (!imageRep) return null;
-    
-    const pngData = imageRep.representationUsingType_properties_(
-      NSBitmapImageFileTypePNG,
-      {}
-    );
-    
-    if (pngData && pngData.length() > 0) {
-      const base64String = pngData.base64EncodedStringWithOptions(0);
-      return "data:image/png;base64," + base64String;
-    }
-  } catch (e) {
-    log("Image conversion error: " + e);
-  }
-  return null;
 }

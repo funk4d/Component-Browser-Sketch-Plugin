@@ -1,82 +1,40 @@
-<p align="center">
-  <img src="github/component-browser-icon.png" alt="Component Browser logo" width="120" height="120">
-</p>
+# Component Browser
 
-# 🧭 Component Browser
+Find and insert components from your Sketch document and enabled libraries. Search by name, switch between sources, or replace selected layers using the keyboard.
 
-A fast, keyboard-driven Sketch plugin for browsing and inserting Symbols (Components) from your document and libraries.
+![Component Browser in light and dark mode, with settings](github/screenshot.png)
 
-![Component Browser Screenshot](github/screenshot.png)
-
-## Features
-
-- 🔍 **Smart Search** — Instantly filter symbols by name
-- 🎨 **Source Filtering** — Switch between All, Local, and Library sources
-- 🖼️ **Preview Thumbnails** — Visual previews for symbols in the list
-- ⌨️ **Keyboard First** — Navigate and insert without touching the mouse
-- 🔄 **Batch Replace** — Replace multiple selected layers at once
+The browser opens as a compact search field and expands as you type. To browse without a search, press ↓ or Tab. Previews load in the background and stay cached between Sketch sessions.
 
 ## Installation
 
-1. Open the [latest release](https://github.com/funk4d/Component-Browser-Sketch-Plugin/releases/latest)
-2. Download `ComponentBrowser.sketchplugin.zip`
-3. Unzip it if your browser did not extract it automatically
-4. Double-click `ComponentBrowser.sketchplugin` to install it in Sketch
+1. Download `ComponentBrowser.sketchplugin.zip` from the [latest release](https://github.com/funk4d/Component-Browser-Sketch-Plugin/releases/latest).
+2. Unzip it and double-click `ComponentBrowser.sketchplugin` to install.
 
-## Usage
+## Using it
 
-### Open Component Browser
+Press ⌘; or choose **Plugins → Component Browser → Launch** in Sketch. You can set a different shortcut in Settings.
 
-**`Cmd + Shift + ;`** — Launch the browser from anywhere in Sketch
+Choose **All**, **Local Document**, or a library to narrow your search. Press Enter to insert a component, or Shift + Enter to replace the layers selected on the canvas.
 
-### Navigation
+Replacing keeps each layer's position and, by default, its dimensions. Uncheck **Preserve current dimension when replacing** to use the component's original size.
+
+Click the logo to open Settings and change the launch shortcut or appearance. Drag the window to move it.
+
+## Keyboard shortcuts
 
 | Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate through symbols |
-| `Tab` | Next source filter (All → Local → Library) |
-| `Shift + Tab` | Previous source filter |
-| `Enter` | Insert selected symbol at viewport center |
-| `Shift + Enter` | **Replace** selected layer(s) with symbol |
-| `Option/Alt + Enter` | Jump to symbol |
-| `Esc` | Close browser |
-
-### Source Filters
-
-- **All** — Show all symbols (local + libraries)
-- **Local** — Symbols defined in current document only
-- **Library Name** — Symbols from specific library
-
-### Replace Mode
-
-When you have layers selected, press **`Shift + Enter`** to replace them with the chosen symbol:
-- Preserves position
-- Preserves dimensions (with checkbox option)
-- Works with multiple selections — replaces all selected layers at once
-
-## Tips
-
-- **Search as you type** — Start typing to filter symbols instantly
-- **Quick library switch** — Use `Tab` to cycle through sources without leaving the keyboard
-- **Drag to move** — Grab the search bar to reposition the window
-
-## Roadmap
-
-- [x] Add symbol preview thumbnails
-- [x] Add customization (settings/preferences)
-- [ ] Integrate search for free icon libraries (e.g., Remix Icon)
-- [ ] Explore menu command introspection/execution (File, Edit, Window, Help, Plugins)
-- [ ] Add more commands
+| --- | --- |
+| ↑ / ↓ | Select a component |
+| Tab / Shift + Tab | Next / previous source |
+| Enter | Insert the selected component |
+| Shift + Enter | Replace selected layers |
+| Option + Enter | Open the component in its source document |
+| Esc | Close the browser |
 
 ## Support
 
-If Component Browser saves you time, you can support its development on Ko-fi:
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/X0Z520U88Y)
-
-## Credits
-
-Created by [Dmytro Shevchuk](https://github.com/funk4d)
+Created by [Dmytro Shevchuk](https://github.com/funk4d). If you find it useful, you can [support development on Ko-fi](https://ko-fi.com/X0Z520U88Y).
 
 ## License
 

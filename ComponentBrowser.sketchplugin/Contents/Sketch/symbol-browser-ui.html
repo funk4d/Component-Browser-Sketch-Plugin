@@ -2,930 +2,72 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <style>
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    
-    /* CSS Variables for theming */
-    :root {
-      --accent-color: #535DFF;
-      --accent-hover: #4a52e0;
-      
-      /* Dark theme (default) */
-      --bg-primary: rgba(30, 30, 30, 0.56);
-      --bg-secondary: rgba(60, 60, 60, 0.54);
-      --bg-tertiary: rgba(37, 37, 37, 0.62);
-      --bg-top-chrome: rgba(37, 37, 37, 0.68);
-      --bg-filter-bar: rgba(37, 37, 37, 0.72);
-      --bg-input: rgba(30, 30, 30, 0.18);
-      --bg-input-focus: rgba(50, 50, 50, 0.3);
-      --text-primary: #e0e0e0;
-      --text-secondary: #888;
-      --text-tertiary: #ccc;
-      --border-color: rgba(255, 255, 255, 0.12);
-      --item-hover: rgba(255, 255, 255, 0.06);
-      --item-selected-text: #fff;
-      --library-text: #888;
-      --key-bg: rgba(255, 255, 255, 0.06);
-      --key-border: rgba(255, 255, 255, 0.12);
-    }
-    
-    /* Light theme */
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg-primary: rgba(245, 245, 245, 0.62);
-        --bg-secondary: rgba(255, 255, 255, 0.72);
-        --bg-tertiary: rgba(240, 240, 240, 0.72);
-        --bg-top-chrome: rgba(243, 243, 243, 0.82);
-        --bg-filter-bar: rgba(243, 243, 243, 0.86);
-        --bg-input: rgba(255, 255, 255, 0.18);
-        --bg-input-focus: rgba(255, 255, 255, 0.28);
-        --text-primary: #333333;
-        --text-secondary: #666666;
-        --text-tertiary: #555555;
-        --border-color: rgba(0, 0, 0, 0.1);
-        --item-hover: rgba(0, 0, 0, 0.05);
-        --item-selected-text: #ffffff;
-        --library-text: #888888;
-        --key-bg: rgba(0, 0, 0, 0.05);
-        --key-border: rgba(0, 0, 0, 0.12);
-      }
-    }
-    
-    html {
-      background: transparent;
-    }
-
-    body { 
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: transparent;
-      color: var(--text-primary);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    .top-chrome {
-      flex-shrink: 0;
-      background: var(--bg-top-chrome);
-      border-bottom: 1px solid var(--border-color);
-    }
-    
-    .search-input {
-      width: 100%;
-      padding: 20px 24px 20px 64px;
-      border: none;
-      font-size: 17px;
-      outline: none;
-      background: transparent;
-      color: var(--text-primary);
-      flex-shrink: 0;
-      z-index: 10;
-      -webkit-app-region: drag;
-    }
-    
-    .search-input.dragging {
-      cursor: grabbing;
-    }
-    
-    .search-input::placeholder {
-      color: var(--text-secondary);
-    }
-    
-    .search-wrapper {
-      position: relative;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      background: transparent;
-    }
-    
-    .search-icon {
-      position: absolute;
-      left: 16px;
-      width: 32px;
-      height: 32px;
-      z-index: 20;
-      padding: 0;
-      border: none;
-      background: transparent;
-      cursor: pointer;
-      -webkit-app-region: no-drag;
-    }
-    .search-icon svg { width: 32px; height: 32px; }
-    /* Three-state nav icon: logo (default) / gear (hover) / back (settings mode).
-       All three are hidden by default and we explicitly opt in to whichever is
-       active — avoids `.search-icon svg { display: block }` accidentally
-       overriding our per-state rules. */
-    .search-icon .nav-icon-logo,
-    .search-icon .nav-icon-gear,
-    .search-icon .nav-icon-back { display: none; }
-
-    body.mode-browser .search-icon .nav-icon-logo { display: block; }
-    body.mode-browser .search-icon:hover .nav-icon-logo { display: none; }
-    body.mode-browser .search-icon:hover .nav-icon-gear { display: block; }
-    body.mode-settings .search-icon .nav-icon-back { display: block; }
-
-    /* "Settings" title (replaces search input when in settings mode) */
-    .settings-title {
-      display: none;
-      position: absolute;
-      left: 64px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 17px;
-      font-weight: 600;
-      color: var(--text-primary);
-      pointer-events: none;
-      z-index: 11;
-    }
-    body.mode-settings .settings-title { display: block; }
-
-    /* === Mode transitions === */
-    /* Settings appears with a soft fade + zoom-in. The animation triggers each
-       time the element gets display:block via the body class change. */
-    @keyframes mode-fade-scale-in {
-      from { opacity: 0; transform: scale(0.95); }
-      to   { opacity: 1; transform: scale(1); }
-    }
-    body.mode-settings .settings-content,
-    body.mode-settings .settings-footer-bar {
-      animation: mode-fade-scale-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-      transform-origin: center top;
-    }
-    /* The title is absolutely positioned with transform: translateY(-50%) for
-       vertical centering. The shared keyframe above replaces transform entirely
-       and breaks centering — use a title-specific keyframe that PRESERVES the
-       translateY anchor throughout the animation. */
-    @keyframes mode-fade-scale-in-title {
-      from { opacity: 0; transform: translateY(-50%) scale(0.95); }
-      to   { opacity: 1; transform: translateY(-50%) scale(1); }
-    }
-    body.mode-settings .settings-title {
-      animation: mode-fade-scale-in-title 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-      transform-origin: left center;
-    }
-    /* Same animation when coming back to the browser — replays for the
-       list/source-filter/controls so the transition feels symmetric. */
-    body.mode-browser.mode-just-restored .source-filter,
-    body.mode-browser.mode-just-restored .list-container,
-    body.mode-browser.mode-just-restored .controls-section {
-      animation: mode-fade-scale-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-      transform-origin: center top;
-    }
-    body.mode-settings .search-input { visibility: hidden; }
-    body.mode-settings .loading-status { display: none; }
-    body.mode-settings .source-filter { display: none; }
-    body.mode-settings .list-container { display: none; }
-    body.mode-settings .controls-section { display: none; }
-    body.mode-browser .settings-content { display: none; }
-    body.mode-browser .settings-footer-bar { display: none; }
-
-    /* Settings content section */
-    .settings-content {
-      flex: 1;
-      overflow-y: auto;
-      background: var(--bg-primary);
-      padding: 20px 24px;
-      box-sizing: border-box;
-    }
-    .settings-section + .settings-section,
-    .settings-section + .settings-checkbox-list,
-    .settings-checkbox-list + .settings-section {
-      margin-top: 8px;
-    }
-    .settings-section-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 10px;
-    }
-    .settings-hotkey-row {
-      display: flex; align-items: center; gap: 8px;
-    }
-    .hotkey-display {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      min-width: 60px;
-      text-align: center;
-      padding: 6px 12px;
-      border-radius: 6px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-    }
-    .hotkey-display.recording {
-      background: var(--accent-color);
-      color: #FFFFFF;
-      border-color: var(--accent-color);
-      animation: pulse-record 1.2s ease-in-out infinite;
-    }
-    @keyframes pulse-record { 0%,100%{opacity:1} 50%{opacity:0.6} }
-    .record-btn {
-      padding: 6px 14px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-primary);
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .record-btn:hover { background: var(--item-hover); }
-
-    /* Contextual note that surfaces only when the current hotkey contains
-       Shift or Option — those modifiers can produce regular typed characters
-       (Shift+; = ':', Option+a = 'å'), and Carbon's hotkey fires globally
-       inside Sketch even while typing into text fields. */
-    .settings-hotkey-note {
-      display: none;
-      margin-top: 8px;
-      font-size: 11px;
-      line-height: 1.4;
-      color: var(--text-secondary);
-      max-width: 460px;
-    }
-    .settings-hotkey-note.is-visible { display: block; }
-    .settings-hotkey-note::before {
-      content: '⚠ ';
-      color: #E0A030;
-    }
-
-    /* Disabled checkboxes (teaser for future versions) */
-    .settings-checkbox-list { margin-top: 24px; }
-    .settings-checkbox {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 0;
-      font-size: 13px;
-      color: var(--text-primary);
-    }
-    .settings-checkbox.disabled { opacity: 0.5; cursor: not-allowed; }
-    .settings-checkbox input[type="checkbox"] {
-      appearance: none; -webkit-appearance: none;
-      width: 18px; height: 18px;
-      border: 1.5px solid var(--border-color);
-      border-radius: 5px;
-      background: var(--bg-secondary);
-    }
-
-    /* Footer with Save (replaces controls-section while in settings mode) */
-    .settings-footer-bar {
-      flex-shrink: 0;
-      border-top: 1px solid var(--border-color);
-      padding: 10px 16px;
-      display: flex; justify-content: flex-end;
-      background: var(--bg-tertiary);
-    }
-    .save-btn {
-      padding: 8px 22px;
-      font-size: 13px; font-weight: 600;
-      color: #FFFFFF;
-      background: var(--accent-color);
-      border: none; border-radius: 6px;
-      cursor: pointer;
-    }
-    .save-btn:hover { background: var(--accent-hover); }
-    
-    .loading-status {
-      position: absolute;
-      right: 24px;
-      top: 50%;
-      transform: translateY(-50%);
-      display: none;
-      align-items: center;
-      justify-content: flex-end;
-      pointer-events: none;
-      z-index: 25;
-    }
-
-    .loading-status.visible {
-      display: flex;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    .stats {
-      font-size: 11px;
-      color: var(--text-secondary);
-      text-align: center;
-      flex-shrink: 0;
-    }
-    
-    .source-filter {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 0 12px 8px;
-      background: transparent;
-      flex-shrink: 0;
-      overflow-x: auto;
-      overflow-y: hidden;
-      scrollbar-width: none;
-    }
-    
-    .source-filter::-webkit-scrollbar {
-      display: none;
-    }
-    
-    .source-btn {
-      padding: 4px 12px;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 8px;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s;
-    }
-    
-    .source-btn:hover {
-      color: var(--text-primary);
-    }
-    
-    .source-btn.active {
-      background: var(--bg-secondary);
-      /* border-color: var(--border-color); */
-      color: var(--text-primary);
-    }
-
-    .update-notice-region {
-      flex: 0 0 auto;
-      padding: 16px 16px 14px;
-      background: var(--bg-primary);
-    }
-
-    .update-notice-region.is-hidden {
-      display: none;
-    }
-
-    .update-notice {
-      position: relative;
-      display: flex;
-      align-items: stretch;
-      gap: 24px;
-      margin: 0;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #fff;
-      color: #000;
-    }
-
-    .update-notice-image {
-      width: 162px;
-      flex: 0 0 162px;
-      background: #dfe1ff;
-      overflow: hidden;
-    }
-
-    .update-notice-image img {
-      width: 100%;
-      height: 100%;
-      display: block;
-      object-fit: cover;
-    }
-
-    .update-notice-content {
-      flex: 1;
-      padding: 20px 42px 20px 0;
-      font-size: 14px;
-      line-height: 1.35;
-      letter-spacing: 0;
-    }
-
-    .update-notice-title {
-      margin: 0 0 14px;
-      font-size: 16px;
-      line-height: 1.2;
-      font-weight: 600;
-      color: #000;
-    }
-
-    .update-notice-line {
-      margin: 0;
-      color: #000;
-    }
-
-    .update-notice-line + .update-notice-line {
-      margin-top: 24px;
-    }
-
-    .update-notice-label {
-      font-weight: 500;
-    }
-
-    .update-notice-key {
-      font-weight: 700;
-    }
-
-    .update-notice-close {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 18px;
-      height: 18px;
-      padding: 0;
-      border: 0;
-      border-radius: 50%;
-      background: #ececec;
-      color: #111;
-      cursor: pointer;
-    }
-
-    .update-notice-close::before,
-    .update-notice-close::after {
-      content: '';
-      position: absolute;
-      left: 4px;
-      right: 4px;
-      top: 8px;
-      height: 2px;
-      border-radius: 2px;
-      background: currentColor;
-    }
-
-    .update-notice-close::before {
-      transform: rotate(45deg);
-    }
-
-    .update-notice-close::after {
-      transform: rotate(-45deg);
-    }
-
-    body.mode-settings .update-notice-region {
-      display: none;
-    }
-    
-    .list-container {
-      flex: 1;
-      overflow-y: auto;
-      background: var(--bg-primary);
-    }
-    
-    .symbols-list {
-      list-style: none;
-      padding: 6px 0;
-      margin: 0;
-      box-sizing: border-box;
-    }
-
-    /* Empty placeholder elements used by the virtual scroller to preserve the
-       total scrollHeight when items above/below the viewport are not in DOM. */
-    .virt-spacer {
-      list-style: none;
-      pointer-events: none;
-      margin: 0;
-    }
-
-    /* Each .symbol-item occupies exactly ITEM_SLOT (52px) so the virtual
-       scroller's offset math is exact. The selected "pill" is drawn by a
-       ::before pseudo inset by 3px to give visual breathing room without
-       breaking the slot height. */
-    .symbol-item {
-      position: relative;
-      height: 52px;
-      margin: 0;
-      padding: 0 16px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      transition: none;
-      color: var(--text-primary);
-      box-sizing: border-box;
-    }
-
-    .symbol-item::before {
-      content: '';
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      top: 3px;
-      bottom: 3px;
-      border-radius: 12px;
-      background: transparent;
-      pointer-events: none;
-    }
-
-    .symbol-item > * {
-      position: relative;
-      z-index: 1;
-    }
-
-    .symbol-item.selected::before {
-      background: var(--accent-color);
-    }
-
-    .symbol-item.selected {
-      color: var(--item-selected-text);
-    }
-
-    .symbol-item.selected .symbol-library {
-      color: rgba(255,255,255,0.7);
-    }
-    
-    .symbol-thumb {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      background-position: center;
-      background-repeat: no-repeat;
-      background-size: contain;
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
-    }
-    
-    .symbol-thumb-initial {
-      font-size: 13px;
-      font-weight: 700;
-      color: #fff;
-      line-height: 1;
-    }
-    
-    .symbol-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .symbol-kind-badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      width: 32px;
-      height: 32px;
-      opacity: 0.5;
-    }
-
-    .symbol-kind-badge svg {
-      width: 32px;
-      height: 32px;
-      display: block;
-    }
-
-    .symbol-item.selected .symbol-kind-badge {
-      opacity: 0.72;
-    }
-    
-    .symbol-name {
-      font-size: 13px;
-      font-weight: 500;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    
-    .symbol-name .match {
-      opacity: 1;
-      font-weight: 600;
-    }
-    
-    .symbol-name .faded {
-      opacity: 0.5;
-    }
-    
-    .symbol-library {
-      font-size: 11px;
-      color: var(--library-text);
-      margin-top: 2px;
-    }
-    
-    .controls-section {
-      border-top: 1px solid var(--border-color);
-      padding: 10px 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      background: var(--bg-tertiary);
-    }
-    
-    .controls-left {
-      flex-shrink: 0;
-    }
-    
-    .controls-center {
-      flex: 1;
-      text-align: center;
-    }
-    
-    .controls-right {
-      flex-shrink: 0;
-    }
-    
-    .preserve-dims-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      color: var(--text-tertiary);
-      cursor: pointer;
-      flex-shrink: 0;
-      padding: 5px 8px;
-      background: var(--border-color);
-      border: 1px solid var(--key-border);
-      border-radius: 5px;
-    }
-    
-    .preserve-dims-checkbox input[type="checkbox"] {
-      width: 12px;
-      height: 12px;
-      accent-color: var(--accent-color);
-    }
-    
-    .shortcuts-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    
-    .shortcut-box {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 4px;
-      border-radius: 5px;
-    }
-    
-    .shortcut-label {
-      font-size: 10px;
-      color: var(--text-tertiary);
-      font-weight: 500;
-    }
-    
-    .key {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1px 4px;
-      background: var(--key-bg);
-      border: 1px solid var(--key-border);
-      border-radius: 3px;
-      font-size: 9px;
-      font-weight: 600;
-      color: var(--text-primary);
-      min-width: 16px;
-      height: 16px;
-    }
-    
-    .key-modifier {
-      background: var(--accent-color);
-      border-color: var(--accent-color);
-      color: #fff;
-    }
-    
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text-secondary);
-    }
-    
-    .loading {
-      height: 100%;
-      min-height: 220px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 40px 24px;
-      color: var(--text-secondary);
-    }
-
-    .spinner {
-      font-size: 24px;
-      position: relative;
-      display: inline-block;
-      width: 1em;
-      height: 1em;
-      flex-shrink: 0;
-    }
-
-    .spinner .spinner-blade {
-      position: absolute;
-      left: 0.4629em;
-      bottom: 0;
-      width: 0.074em;
-      height: 0.2777em;
-      border-radius: 0.0555em;
-      background-color: transparent;
-      -webkit-transform-origin: center -0.2222em;
-      transform-origin: center -0.2222em;
-      animation: spinner-fade9234 1s infinite linear;
-    }
-
-    .spinner .spinner-blade:nth-child(1) {
-      animation-delay: 0s;
-      transform: rotate(0deg);
-    }
-
-    .spinner .spinner-blade:nth-child(2) {
-      animation-delay: 0.083s;
-      transform: rotate(30deg);
-    }
-
-    .spinner .spinner-blade:nth-child(3) {
-      animation-delay: 0.166s;
-      transform: rotate(60deg);
-    }
-
-    .spinner .spinner-blade:nth-child(4) {
-      animation-delay: 0.249s;
-      transform: rotate(90deg);
-    }
-
-    .spinner .spinner-blade:nth-child(5) {
-      animation-delay: 0.332s;
-      transform: rotate(120deg);
-    }
-
-    .spinner .spinner-blade:nth-child(6) {
-      animation-delay: 0.415s;
-      transform: rotate(150deg);
-    }
-
-    .spinner .spinner-blade:nth-child(7) {
-      animation-delay: 0.498s;
-      transform: rotate(180deg);
-    }
-
-    .spinner .spinner-blade:nth-child(8) {
-      animation-delay: 0.581s;
-      transform: rotate(210deg);
-    }
-
-    .spinner .spinner-blade:nth-child(9) {
-      animation-delay: 0.664s;
-      transform: rotate(240deg);
-    }
-
-    .spinner .spinner-blade:nth-child(10) {
-      animation-delay: 0.747s;
-      transform: rotate(270deg);
-    }
-
-    .spinner .spinner-blade:nth-child(11) {
-      animation-delay: 0.83s;
-      transform: rotate(300deg);
-    }
-
-    .spinner .spinner-blade:nth-child(12) {
-      animation-delay: 0.913s;
-      transform: rotate(330deg);
-    }
-
-    @keyframes spinner-fade9234 {
-      0% {
-        background-color: var(--text-secondary);
-      }
-
-      100% {
-        background-color: transparent;
-      }
-    }
-
-  </style>
+  <link rel="stylesheet" href="browser-redesign.css">
 </head>
-<body class="mode-browser">
-  <div class="top-chrome">
-  <div class="search-wrapper">
-    <button type="button" class="search-icon nav-icon-btn" id="leftIconBtn" title="Settings" aria-label="Toggle settings">
-      <!-- LOGO: default state in browser mode -->
-      <svg class="nav-icon-logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><defs><path id="cb-logo-a" d="M8 0h16a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8Z"/></defs><g fill="none" fill-rule="evenodd"><use href="#cb-logo-a" fill="#535DFF"/><path fill="#FFF" stroke="#535DFF" stroke-width=".809" d="m24.184 7.911-3.388 11.594a2.023 2.023 0 0 1-1.284 1.288l-10.72 3.565a.91.91 0 0 1-1.187-.721l3.602-11.15a2.023 2.023 0 0 1 1.28-1.28l10.72-3.565a.91.91 0 0 1 .977.27Zm-8.2 6.252c-.504 0-.959.204-1.288.533-.33.33-.533.784-.533 1.287 0 .503.204.958.533 1.287.33.33.784.533 1.287.533.503 0 .958-.203 1.287-.533.33-.33.534-.784.534-1.287 0-.503-.204-.958-.534-1.287a1.815 1.815 0 0 0-1.287-.533Z"/></g></svg>
-      <!-- GEAR: hover state in browser mode -->
-      <svg class="nav-icon-gear" width="32px" height="32px" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-          <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-              <g id="Page-1">
-                  <g id="Group" transform="translate(-15, -14)">
-                      <path d="M46,22 L46,38 C46,41.8659932 42.8659932,45 39,45 L23,45 C19.1340068,45 16,41.8659932 16,38 L16,22 C16,18.1340068 19.1340068,15 23,15 L39,15 C42.8659932,15 46,18.1340068 46,22 Z" id="Path" stroke="#535DFF" stroke-width="2"></path>
-                      <g id="settings-3-fill" transform="translate(19.1902, 18.2612)" fill="#535DFF" fill-rule="nonzero">
-                          <path d="M9.95401,2.2106 C11.2876,1.93144 12.6807,1.92263 14.0449,2.20785 C14.2219,3.3674 14.9048,4.43892 15.9997,5.07103 C17.0945,5.70313 18.364,5.75884 19.4566,5.3323 C20.3858,6.37118 21.0747,7.58203 21.4997,8.87652 C20.5852,9.60958 19.9997,10.736 19.9997,11.9992 C19.9997,13.2632 20.5859,14.3902 21.5013,15.1232 C21.29,15.7636 21.0104,16.3922 20.6599,16.9992 C20.3094,17.6063 19.9049,18.1627 19.4559,18.6659 C18.3634,18.2396 17.0943,18.2955 15.9997,18.9274 C14.9057,19.559 14.223,20.6294 14.0453,21.7879 C12.7118,22.067 11.3187,22.0758 9.95443,21.7906 C9.77748,20.6311 9.09451,19.5595 7.99967,18.9274 C6.90484,18.2953 5.63539,18.2396 4.54272,18.6662 C3.61357,17.6273 2.92466,16.4164 2.49964,15.1219 C3.41412,14.3889 3.99968,13.2624 3.99968,11.9992 C3.99968,10.7353 3.41344,9.60827 2.49805,8.87524 C2.70933,8.23482 2.98894,7.60629 3.33942,6.99923 C3.68991,6.39217 4.09443,5.83576 4.54341,5.33257 C5.63593,5.75881 6.90507,5.703 7.99967,5.07103 C9.09364,4.43942 9.7764,3.3691 9.95401,2.2106 Z M11.9997,14.9992 C13.6565,14.9992 14.9997,13.6561 14.9997,11.9992 C14.9997,10.3424 13.6565,8.99923 11.9997,8.99923 C10.3428,8.99923 8.99967,10.3424 8.99967,11.9992 C8.99967,13.6561 10.3428,14.9992 11.9997,14.9992 Z" id="Shape"></path>
-                      </g>
-                  </g>
-              </g>
-          </g>
-      </svg>
-      <!-- BACK ARROW: settings mode -->
-      <svg class="nav-icon-back" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8 0h16a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H8a8 8 0 0 1-8-8V8a8 8 0 0 1 8-8Z" fill="#535DFF"/>
-        <g transform="translate(4 4)" fill="#FFFFFF">
-          <polygon points="22.0003 13.0001 22.0004 11.0002 5.82845 11.0002 9.77817 7.05044 8.36396 5.63623 2 12.0002 8.36396 18.3642 9.77817 16.9499 5.8284 13.0002"/>
-        </g>
-      </svg>
-    </button>
-    <span class="settings-title" id="settingsTitle">Settings</span>
-    <input type="text" class="search-input" id="searchInput" placeholder="Search symbols..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-  </div>
-  <div class="source-filter" id="sourceFilter"></div>
-  </div>
-
-  <div class="update-notice-region is-hidden" id="updateNotice">
-    <div class="update-notice">
-      <div class="update-notice-image">
-        <img src="../Resources/img.png" alt="">
+<body class="mode-browser presentation-compact" data-theme="light" data-presentation="compact">
+  <main class="panel" id="browserPanel" aria-label="Component Browser">
+    <header class="top-chrome">
+      <div class="search-wrapper">
+        <button type="button" class="search-icon" id="leftIconBtn" title="Settings" aria-label="Open settings">
+          <img class="nav-icon" data-icon="logo" src="../Resources/redesign/logo-expanded.svg" alt="" draggable="false">
+        </button>
+        <label class="visually-hidden" for="searchInput">Search components</label>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search components..." autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="symbolsList" aria-expanded="false">
+        <span class="settings-title">Settings</span>
+        <span class="switch-hint">Switch library <kbd class="key key-word">tab</kbd></span>
       </div>
-      <div class="update-notice-content">
-        <button class="update-notice-close" id="updateNoticeClose" type="button" aria-label="Close update notice"></button>
-        <p class="update-notice-title" id="updateNoticeTitle">Component Browser has been updated to version 1.4.0!</p>
-        <p class="update-notice-line">🎉 <span class="update-notice-label">New Customization Options:</span> you can now set your own shortcut to launch Component Browser.</p>
-        <p class="update-notice-line">🔍 <span class="update-notice-label">New shortcut:</span> <span class="update-notice-key">⌥ + Enter</span> instantly jump to the currently selected symbol in its source library.</p>
-      </div>
-    </div>
-  </div>
-  
-  <div class="list-container" id="listContainer">
-    <div class="loading" id="loading">
-      <div class="spinner" aria-hidden="true">
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-        <div class="spinner-blade"></div>
-      </div>
-    </div>
-    <ul class="symbols-list" id="symbolsList" style="display: none;"></ul>
-    <div class="empty-state" id="emptyState" style="display: none;">
-      <div>No symbols found</div>
-    </div>
-  </div>
-  
-  <div class="controls-section">
-    <div class="controls-left">
-      <label class="preserve-dims-checkbox">
-        <input type="checkbox" id="preserveDimsCheckbox" checked>
-        <span>Preserve current dimension when replacing</span>
-      </label>
-    </div>
-    <div class="controls-center">
-      <div class="stats" id="stats">Loading...</div>
-    </div>
-    <div class="controls-right">
-      <div class="shortcuts-row">
-        <div class="shortcut-box">
-          <span class="key">tab</span>
-          <span class="shortcut-label">Switch Library</span>
+    </header>
+    <section class="results-area" aria-label="Search results">
+      <div class="source-filter" id="sourceFilter" role="tablist" aria-label="Component libraries"></div>
+      <section class="update-notice-region is-hidden" id="updateNotice" aria-labelledby="updateNoticeTitle" aria-hidden="true">
+        <img class="update-notice-image" src="../Resources/redesign/update-2-artwork@2x.png" width="162" height="168" alt="" draggable="false">
+        <h2 class="update-notice-title" id="updateNoticeTitle">Meet Component Browser 2.0!</h2>
+        <div class="update-notice-content">
+          <p>✨ New design: a Spotlight-inspired interface with fluid animations.</p>
+          <p>⚡ Faster browsing, even in large libraries.</p>
+          <p>🖼️ Sharper previews with background caching.</p>
         </div>
-        <div class="shortcut-box">
-          <span class="key">⇧</span><span class="key">↵</span>
-          <span class="shortcut-label">Replace</span>
-        </div>
-        <div class="shortcut-box">
-          <span class="key">esc</span>
-          <span class="shortcut-label">Close</span>
+        <button class="update-notice-close" id="updateNoticeClose" type="button" aria-label="Dismiss update news"></button>
+      </section>
+      <div class="list-container" id="listContainer">
+        <div class="loading" id="loading"><span class="spinner" aria-hidden="true"></span><span>Loading components…</span></div>
+        <ul class="symbols-list" id="symbolsList" role="listbox" aria-label="Components" style="display:none"></ul>
+        <div class="empty-state" id="emptyState" style="display:none">No components found</div>
+      </div>
+      <div class="controls-section">
+        <label class="preserve-dims-checkbox">
+          <input type="checkbox" id="preserveDimsCheckbox" checked>
+          <span>Preserve current dimension when replacing</span>
+        </label>
+      </div>
+      <div class="stats" id="stats" aria-live="polite"></div>
+    </section>
+    <section class="settings-content" id="settingsContent" aria-label="Settings" aria-hidden="true">
+      <div class="settings-section">
+        <h2 class="settings-section-label">Appearance</h2>
+        <div class="appearance-options" role="radiogroup" aria-label="Appearance">
+          <button class="appearance-option" data-appearance="light" type="button" role="radio" aria-checked="false"><span class="appearance-preview"><img src="../Resources/redesign/appearance-light.png" alt=""></span><span class="appearance-option-label">Light</span></button>
+          <button class="appearance-option" data-appearance="dark" type="button" role="radio" aria-checked="false"><span class="appearance-preview"><img src="../Resources/redesign/appearance-dark.png" alt=""></span><span class="appearance-option-label">Dark</span></button>
+          <button class="appearance-option" data-appearance="auto" type="button" role="radio" aria-checked="true"><span class="appearance-preview"><img src="../Resources/redesign/appearance-auto.png" alt=""></span><span class="appearance-option-label">Auto</span></button>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- Settings inline content (shown when body.mode-settings) -->
-  <div class="settings-content" id="settingsContent">
-    <div class="settings-section">
-      <div class="settings-section-label">Launch hotkey</div>
-      <div class="settings-hotkey-row">
-        <span class="hotkey-display" id="hotkeyDisplay">⌘;</span>
-        <button class="record-btn" id="recordBtn" type="button">Record new shortcut</button>
+      <div class="settings-hotkey-section">
+        <h2 class="settings-section-label">Launch hotkey</h2>
+        <div class="settings-hotkey-row"><span class="hotkey-display" id="hotkeyDisplay">⌘;</span><button class="record-btn" id="recordBtn" type="button">Record new shortcut</button></div>
+        <div class="settings-hotkey-note" id="hotkeyNote"></div>
       </div>
-      <div class="settings-hotkey-note" id="hotkeyNote">
-        With Shift or Option in the combo, typing a matching character in a
-        Sketch text field will also trigger the hotkey (e.g. <code>⇧;</code>
-        produces <code>:</code>, <code>⌥a</code> produces <code>å</code>).
+      <div class="keyboard-shortcuts">
+        <h2 class="settings-section-label">Keyboard Shortcuts</h2>
+        <dl>
+          <dt>Insert selected component</dt><dd><kbd class="key">⏎</kbd></dd>
+          <dt>Replace selected component</dt><dd><kbd class="key">⇧</kbd><span>+</span><kbd class="key">⏎</kbd></dd>
+          <dt>Jump to selected component</dt><dd><kbd class="key">⌥</kbd><span>+</span><kbd class="key">⏎</kbd></dd>
+          <dt>Switch library</dt><dd><kbd class="key key-word">tab</kbd></dd>
+          <dt>Close</dt><dd><kbd class="key key-word">esc</kbd></dd>
+        </dl>
       </div>
-    </div>
-    <div class="settings-checkbox-list">
-      <label class="settings-checkbox disabled">
-        <input type="checkbox" disabled>
-        <span>Enable RemixIcon library</span>
-      </label>
-      <label class="settings-checkbox disabled">
-        <input type="checkbox" disabled>
-        <span>Enable Phosphor Icons library</span>
-      </label>
-    </div>
-  </div>
-
-  <!-- Settings footer (Save button bottom-right). Replaces controls-section in settings mode. -->
-  <div class="settings-footer-bar" id="settingsFooterBar">
-    <button class="save-btn" id="saveBtn" type="button">Save</button>
-  </div>
+    </section>
+  </main>
 
   <script>
     // Initial data may be injected by the plugin as a separate <script> tag in
@@ -935,6 +77,14 @@
 
     let allSymbols = [];
     let filteredSymbols = [];
+    let componentById = new Map();
+    const previewById = new Map();
+    const previewVersionById = new Map();
+    const rowNodeCache = new Map();
+    const ROW_NODE_CACHE_LIMIT = 160;
+    let loadedDocumentId = null;
+    let hasLoadedSymbols = false;
+    let sourceFilterTouched = false;
     let selectedIndex = -1;
     let isLoadingSymbols = false;
     let isBrowserActive = true;
@@ -957,9 +107,158 @@
     const updateNoticeClose = document.getElementById('updateNoticeClose');
     const updateNoticeTitle = document.getElementById('updateNoticeTitle');
     const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+    function scheduleUIFrame(callback) {
+      // Legacy WebKit suspends rAF for NSPanel even when it is onscreen.
+      return window.NATIVE_WINDOW_ANIMATIONS ? setTimeout(callback, 16) : window.requestAnimationFrame(callback);
+    }
     
     let currentSourceFilter = 'All';
     let availableSources = ['All', 'Local'];
+    let presentationReady = false;
+    let presentationState = 'compact';
+    let browseWithoutQuery = false;
+    let isPresentationAnimating = false;
+    let presentationTimer = null;
+    const browserPreferences = { appearance: 'auto', preserveDimensions: true };
+    const navButton = document.getElementById('leftIconBtn');
+    const navImage = navButton.querySelector('.nav-icon');
+    const navSources = {
+      logo: '../Resources/redesign/logo-expanded.svg',
+      gear: '../Resources/redesign/settings.svg',
+      back: '../Resources/redesign/back.svg'
+    };
+    let navHovered = false;
+    Object.keys(navSources).forEach(key => {
+      const image = new Image();
+      image.src = navSources[key];
+    });
+
+    function updateNavigationIcon() {
+      const icon = document.body.classList.contains('mode-settings') ? 'back' :
+        (navHovered ? 'gear' : 'logo');
+      if (navImage.dataset.icon !== icon) {
+        // Only morph the logo between presentations. A hover glyph replacement
+        // must not inherit an unfinished clipping animation from another glyph.
+        navImage.style.transition = 'none';
+        navImage.dataset.icon = icon;
+        navImage.src = navSources[icon];
+        navImage.getBoundingClientRect();
+        navImage.style.transition = '';
+      }
+      navButton.classList.toggle('is-nav-hovered', navHovered);
+    }
+
+    function resetNavigationHover() {
+      navHovered = false;
+      updateNavigationIcon();
+    }
+
+    function trackNavigationPointer(event) {
+      if (!navButton.contains(event.target)) {
+        if (navHovered) resetNavigationHover();
+        return;
+      }
+      const rect = navButton.getBoundingClientRect();
+      const hovered = isBrowserActive &&
+        event.clientX >= rect.left && event.clientX < rect.right &&
+        event.clientY >= rect.top && event.clientY < rect.bottom;
+      if (hovered === navHovered) return;
+      navHovered = hovered;
+      updateNavigationIcon();
+    }
+
+    navButton.addEventListener('mouseenter', trackNavigationPointer);
+    navButton.addEventListener('mouseleave', resetNavigationHover);
+    document.addEventListener('mousemove', trackNavigationPointer, { passive: true });
+    window.addEventListener('blur', resetNavigationHover);
+    window.addEventListener('focus', resetNavigationHover);
+
+    function applyAppearance() {
+      const dark = browserPreferences.appearance === 'dark' ||
+        (browserPreferences.appearance === 'auto' && themeMediaQuery && themeMediaQuery.matches);
+      document.body.dataset.theme = dark ? 'dark' : 'light';
+      document.querySelectorAll('[data-appearance]').forEach(button => {
+        button.setAttribute('aria-checked', String(button.dataset.appearance === browserPreferences.appearance));
+      });
+      refreshKindBadgesInList();
+    }
+
+    window.applyBrowserPreferences = function(preferences) {
+      const value = preferences || {};
+      if (['light', 'dark', 'auto'].includes(value.appearance)) browserPreferences.appearance = value.appearance;
+      document.getElementById('preserveDimsCheckbox').checked = browserPreferences.preserveDimensions;
+      applyAppearance();
+    };
+
+    function saveBrowserPreferences() {
+      alert('browser-preferences:' + encodeURIComponent(JSON.stringify({ appearance: browserPreferences.appearance })));
+    }
+
+    document.querySelectorAll('[data-appearance]').forEach(button => {
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const options = Array.from(document.querySelectorAll('[data-appearance]'));
+        const offset = event.key === 'ArrowRight' ? 1 : -1;
+        const next = options[(options.indexOf(button) + offset + options.length) % options.length];
+        next.click();
+        next.focus();
+      });
+      button.addEventListener('click', () => {
+        browserPreferences.appearance = button.dataset.appearance;
+        applyAppearance();
+        saveBrowserPreferences();
+      });
+    });
+    document.getElementById('preserveDimsCheckbox').addEventListener('change', event => {
+      browserPreferences.preserveDimensions = event.target.checked;
+    });
+
+    function isPreviewPresentationReady() {
+      // Utility panels are not main windows. Legacy WebKit can report them
+      // hidden while NSPanel is visible; the native bridge owns visibility.
+      return isBrowserActive && presentationState === 'results' && !isPresentationAnimating;
+    }
+
+    function pausePresentationPreviews() {
+      clearTimeout(previewIdleTimer);
+      clearTimeout(previewDispatchTimer);
+      previewIdleTimer = null;
+      previewDispatchTimer = null;
+      previewDispatchQueue.length = 0;
+      queuedPreviews.clear();
+    }
+
+    function syncPresentation(animated, force) {
+      updateNavigationIcon();
+      if (!presentationReady) return;
+      const next = document.body.classList.contains('mode-settings') ? 'settings' :
+        (searchInput.value.trim() || browseWithoutQuery || (window.UPDATE_NOTICE && window.UPDATE_NOTICE.visible)
+          ? 'results' : 'compact');
+      const changed = presentationState !== next;
+      presentationState = next;
+      document.body.dataset.presentation = next;
+      ['compact', 'results', 'settings'].forEach(state => document.body.classList.toggle('presentation-' + state, state === next));
+      searchInput.setAttribute('aria-expanded', String(next === 'results'));
+      document.querySelector('.results-area').setAttribute('aria-hidden', String(next !== 'results'));
+      document.getElementById('settingsContent').setAttribute('aria-hidden', String(next !== 'settings'));
+      if (!changed && !force) return;
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const animate = !!animated && changed && !reduceMotion;
+      isPresentationAnimating = animate;
+      pausePresentationPreviews();
+      clearTimeout(presentationTimer);
+      alert('browser-presentation:' + next + ':' + (animate ? '1' : '0'));
+      presentationTimer = setTimeout(() => {
+        presentationTimer = null;
+        isPresentationAnimating = false;
+        if (next === presentationState && isPreviewPresentationReady()) {
+          scheduleVirtRender();
+          requestPreviewsForVisibleItems();
+        }
+      }, animate ? 480 : 0);
+    }
     
     // SVG icons as inline HTML strings (not data URIs) - copied from Resources folder
     const ICONS = {
@@ -969,29 +268,46 @@
       library_light: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><defs><path id="a" d="M0 0h32v32H0V0Z"/><path id="b" d="M0 0h22v14H0V0Z"/></defs><g fill="none" fill-rule="evenodd" stroke="#FFF" stroke-linecap="round" stroke-width="1.4"><path d="M9.588 18.333C7.054 18.333 5 16.245 5 13.667h0C5 11.09 7.054 9 9.588 9h5.49c2.535 0 4.59 2.09 4.59 4.667h0c0 2.578-2.055 4.666-4.59 4.666"/><path d="M22.412 13.667c2.534 0 4.588 2.088 4.588 4.666h0C27 20.91 24.946 23 22.412 23h-5.49c-2.535 0-4.59-2.09-4.59-4.667h0c0-2.578 2.055-4.666 4.59-4.666"/></g></svg>'
     };
     
-    window.applyUpdateNotice = function(version, visible) {
+    window.applyUpdateNotice = function(version, visible, animated) {
       window.UPDATE_NOTICE = { version: version, visible: !!visible };
       if (!updateNotice) return;
       if (updateNoticeTitle && version) {
-        updateNoticeTitle.textContent = 'Component Browser has been updated to version ' + version + '!';
+        updateNoticeTitle.textContent = 'Meet Component Browser ' + version + '!';
       }
       updateNotice.classList.toggle('is-hidden', !visible);
+      updateNotice.setAttribute('aria-hidden', String(!visible));
+      document.body.classList.toggle('has-update-notice', !!visible);
+      if (presentationReady) {
+        syncPresentation(!!animated);
+        scheduleVirtRender();
+        requestPreviewsForVisibleItems();
+      }
+    };
+
+    window.setComponentCount = function(count) {
+      searchInput.placeholder = Number.isFinite(count)
+        ? 'Search by ' + count + ' components...' : 'Search components...';
     };
 
     // Auto-load initial data if injected by plugin
     document.addEventListener('DOMContentLoaded', function() {
+      if (window.NATIVE_WINDOW_ANIMATIONS) document.body.classList.add('native-window');
+      window.setComponentCount(window.INITIAL_COMPONENT_COUNT);
       if (window.UPDATE_NOTICE && window.UPDATE_NOTICE.visible) {
         window.applyUpdateNotice(window.UPDATE_NOTICE.version, true);
       }
       if (window.INITIAL_SYMBOLS) {
         console.log('Auto-loading initial symbols:', window.INITIAL_SYMBOLS.length);
-        window.loadSymbols(window.INITIAL_SYMBOLS, window.INITIAL_UI_STATE || '');
+        window.loadSymbols(window.INITIAL_SYMBOLS, window.INITIAL_UI_STATE || '', window.INITIAL_DOCUMENT_ID);
       }
       // Plugin can request the window opens directly in settings mode (via
       // the Settings menu command). Honor the flag before any user interaction.
       if (window.INITIAL_MODE === 'settings' && typeof window.enterSettingsMode === 'function') {
         window.enterSettingsMode();
       }
+      window.applyBrowserPreferences(window.INITIAL_PREFERENCES || {});
+      presentationReady = true;
+      syncPresentation(false, true);
       // Backend injects window.INITIAL_HOTKEY at HTML build time. Apply it
       // directly — bypasses the alert→evaluateWebScript round-trip that can
       // race against the WebView JS engine being paused inside the alert.
@@ -1006,9 +322,11 @@
     });
 
     if (updateNoticeClose) {
-      updateNoticeClose.addEventListener('click', function() {
-        if (updateNotice) updateNotice.classList.add('is-hidden');
-        const version = window.UPDATE_NOTICE && window.UPDATE_NOTICE.version ? window.UPDATE_NOTICE.version : '1.4.0';
+      updateNoticeClose.addEventListener('click', function(event) {
+        event.stopPropagation();
+        const version = window.UPDATE_NOTICE && window.UPDATE_NOTICE.version;
+        if (!version) return;
+        window.applyUpdateNotice(version, false, true);
         try { alert('dismiss-update-notice:' + version); } catch (e) {}
       });
     }
@@ -1067,14 +385,13 @@
       if (e.shiftKey) mods |= CARBON_SHIFT;
       if (e.altKey)   mods |= CARBON_OPTION;
       if (e.ctrlKey)  mods |= CARBON_CONTROL;
-      // Reject bare-key bindings — Carbon RegisterEventHotKey needs a modifier
-      // for sane behavior in an editor like Sketch.
+      // Reject bare-key bindings so regular typing in Sketch is never captured.
       if (mods === 0) return null;
       return { keyCode: carbonKey, modifiers: mods };
     }
 
     let isRecordingHotkey = false;
-    // Tracks whether we asked the backend to pause the Carbon hotkey. The
+    // Tracks whether we asked the backend to pause the launch hotkey. The
     // active hotkey would otherwise swallow the matching keystroke before the
     // recorder's keydown listener fires — the user can't re-record their own
     // current combo while it's still bound.
@@ -1086,13 +403,11 @@
     let preRecordHotkey = null;
     const leftIconBtn = document.getElementById('leftIconBtn');
     const recordBtn = document.getElementById('recordBtn');
-    const saveBtn = document.getElementById('saveBtn');
     const hotkeyDisplay = document.getElementById('hotkeyDisplay');
     const hotkeyNote = document.getElementById('hotkeyNote');
 
     // Show the warning when the active combo includes Shift or Option, because
-    // those modifiers can produce regular typed characters and Carbon's
-    // application-wide hotkey fires even while the user is typing.
+    // those modifiers can produce regular typed characters in Sketch fields.
     function updateHotkeyNote(modifiers) {
       const risky = (modifiers & CARBON_SHIFT) || (modifiers & CARBON_OPTION);
       if (hotkeyNote) hotkeyNote.classList.toggle('is-visible', !!risky);
@@ -1102,9 +417,11 @@
       document.body.classList.remove('mode-browser');
       document.body.classList.add('mode-settings');
       leftIconBtn.title = 'Back';
+      leftIconBtn.setAttribute('aria-label', 'Back to search');
+      syncPresentation(true);
     }
     function enterBrowserMode() {
-      // If the user clicked Record but exited without finishing, the Carbon
+      // If the user clicked Record but exited without finishing, the launch
       // hotkey is still unregistered — tell the backend to restore it.
       if (isHotkeyPaused) {
         try { alert('resume-hotkey'); } catch (e) {}
@@ -1119,6 +436,8 @@
       document.body.classList.add('mode-just-restored');
       setTimeout(() => document.body.classList.remove('mode-just-restored'), 260);
       leftIconBtn.title = 'Settings';
+      leftIconBtn.setAttribute('aria-label', 'Open settings');
+      syncPresentation(true);
       try { searchInput.focus(); } catch (e) {}
     }
     // Expose for backend (evaluateWebScript) — used by the Settings menu
@@ -1133,19 +452,21 @@
         enterSettingsMode();
       }
     });
-    saveBtn.addEventListener('click', enterBrowserMode);
+
+    // Entrance and exit belong to the native NSPanel, including its shadow.
 
     recordBtn.addEventListener('click', () => {
       preRecordHotkey = currentHotkey;
       isRecordingHotkey = true;
+      hotkeyDisplay.classList.remove('status-message');
       hotkeyDisplay.classList.add('recording');
       hotkeyDisplay.textContent = '…';
       if (!isHotkeyPaused) {
-        try { alert('pause-hotkey'); isHotkeyPaused = true; } catch (e) {}
+        try { alert('start-hotkey-recording'); isHotkeyPaused = true; } catch (e) {}
       }
     });
 
-    // Restore the display + resume Carbon, without saving anything.
+    // Restore the display and resume the native hotkey without saving.
     function cancelRecordingHotkey() {
       isRecordingHotkey = false;
       hotkeyDisplay.classList.remove('recording');
@@ -1164,7 +485,7 @@
     // immediately on first valid combo (modifier + key).
     document.addEventListener('keydown', (e) => {
       if (!isRecordingHotkey) return;
-      // Escape cancels recording and restores the prior display + Carbon.
+      // Escape cancels recording and restores the prior display and hotkey.
       if (e.code === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -1185,7 +506,6 @@
       hotkeyDisplay.classList.remove('recording');
       hotkeyDisplay.textContent = hotkeyToLabel(hk.keyCode, hk.modifiers);
       updateHotkeyNote(hk.modifiers);
-      currentHotkey = { keyCode: hk.keyCode, modifiers: hk.modifiers };
       // Backend's set-hotkey handler re-registers with the new combo, so the
       // pause from Record click is effectively lifted here.
       isHotkeyPaused = false;
@@ -1195,9 +515,37 @@
     // Backend pushes the current hotkey on plugin open via INITIAL_HOTKEY
     // injection (fresh window) or evaluateWebScript (existing window).
     window.applyCurrentHotkey = function(keyCode, modifiers) {
+      isRecordingHotkey = false;
+      isHotkeyPaused = false;
+      hotkeyDisplay.classList.remove('recording', 'status-message');
       hotkeyDisplay.textContent = hotkeyToLabel(keyCode, modifiers);
       updateHotkeyNote(modifiers);
       currentHotkey = { keyCode: keyCode, modifiers: modifiers };
+    };
+
+    window.hotkeyRecordingNeedsModifier = function() {
+      if (isRecordingHotkey) { hotkeyDisplay.classList.add('status-message'); hotkeyDisplay.textContent = 'Need modifier'; }
+    };
+
+    window.finishHotkeyRecording = function(keyCode, modifiers, success) {
+      isRecordingHotkey = false;
+      isHotkeyPaused = false;
+      hotkeyDisplay.classList.remove('recording');
+      hotkeyDisplay.classList.toggle('status-message', !success);
+      if (success) {
+        hotkeyDisplay.textContent = hotkeyToLabel(keyCode, modifiers);
+        updateHotkeyNote(modifiers);
+        currentHotkey = { keyCode: keyCode, modifiers: modifiers };
+      } else {
+        hotkeyDisplay.textContent = 'Shortcut unavailable';
+        setTimeout(() => {
+          if (currentHotkey) {
+            hotkeyDisplay.classList.remove('status-message');
+            hotkeyDisplay.textContent = hotkeyToLabel(currentHotkey.keyCode, currentHotkey.modifiers);
+            updateHotkeyNote(currentHotkey.modifiers);
+          }
+        }, 1500);
+      }
     };
 
     // Track which previews are already requested
@@ -1210,52 +558,64 @@
     const PREVIEW_DISPATCH_DELAY_MS = 8;
     const PREVIEW_REQUEST_TIMEOUT_MS = 4000;
     const MAX_PREVIEW_RETRIES = 4;
+    const PREVIEW_IDLE_RENDER_DELAY_MS = 40;
+    const PREVIEW_NEXT_RENDER_DELAY_MS = 30;
     let previewDispatchTimer = null;
+    let previewIdleTimer = null;
 
     // Virtualized list rendering: keep only ~visible items in the DOM. With
     // 5000+ symbols a full render takes seconds because WebKit lays out every
-    // <li>. ITEM_SLOT must equal the actual rendered height of .symbol-item
-    // (see CSS, currently 52px).
-    const ITEM_SLOT = 52;
-    const VIRT_BUFFER = 8;
-    const LIST_VERTICAL_PADDING = 6;
+    // <li>. ITEM_SLOT must equal the 84px row height in browser-redesign.css.
+    const ITEM_SLOT = 84;
+    const VIRT_BUFFER = 3;
+    const LIST_VERTICAL_PADDING = 0;
     let virtScrollRafQueued = false;
-    
-    window.updateSymbolPreview = function(symbolId, previewData) {
-      // Update preview in allSymbols
-      const symbol = allSymbols.find(s => s.id === symbolId);
-      if (symbol) {
-        symbol.preview = previewData;
-      }
-      // Update preview in filteredSymbols
-      const filteredSymbol = filteredSymbols.find(s => s.id === symbolId);
-      if (filteredSymbol) {
-        filteredSymbol.preview = previewData;
-      }
+    let renderedRowSignature = '';
+
+    window.updateSymbolPreview = function(symbolId, previewData, versionTag) {
+      symbolId = String(symbolId);
+      previewById.set(symbolId, previewData);
+      if (versionTag) previewVersionById.set(symbolId, String(versionTag));
+      const component = componentById.get(symbolId);
+      if (component) component.preview = previewData;
       loadedPreviews.add(symbolId);
       requestedPreviews.add(symbolId);
       queuedPreviews.delete(symbolId);
       previewRequestTimestamps.delete(symbolId);
       previewRetryCounts.delete(symbolId);
       updatePreviewThumbnailInList(symbolId, previewData);
+      scheduleNextVisiblePreview(PREVIEW_NEXT_RENDER_DELAY_MS);
+    };
+
+    window.applyPreviewVersionTags = function(tags) {
+      let changed = false;
+      Object.keys(tags || {}).forEach(id => {
+        const version = String(tags[id]);
+        const previousVersion = previewVersionById.get(id);
+        previewVersionById.set(id, version);
+        if (!previousVersion || previousVersion === version) return;
+        previewById.delete(id);
+        rowNodeCache.delete(id);
+        loadedPreviews.delete(id);
+        requestedPreviews.delete(id);
+        const component = componentById.get(id);
+        if (component) component.preview = null;
+        changed = true;
+      });
+      if (changed) {
+        renderedRowSignature = '';
+        renderSymbols();
+        requestPreviewsForVisibleItems();
+      }
     };
     
     window.markSymbolAsLocal = function(symbolId) {
-      // Mark symbol as local (was imported from library for preview)
-      const symbol = allSymbols.find(s => s.id === symbolId);
-      if (symbol) {
-        symbol.library = null;
-        symbol.libraryName = 'Local';
+      const component = componentById.get(String(symbolId));
+      if (component) {
+        component.library = null;
+        component.libraryName = 'Local';
       }
-      const filteredSymbol = filteredSymbols.find(s => s.id === symbolId);
-      if (filteredSymbol) {
-        filteredSymbol.library = null;
-        filteredSymbol.libraryName = 'Local';
-      }
-      // Re-apply filters if currently on Local filter
-      if (currentSourceFilter === 'Local') {
-        applyFilters();
-      }
+      if (currentSourceFilter === 'Local') applyFilters();
     };
     
     function resetStuckPreviewRequest(symbolId) {
@@ -1298,13 +658,20 @@
     }
 
     function sendPreviewRequest(symbolId, priority) {
-      if (!isBrowserActive || !symbolId) return;
+      if (!isPreviewPresentationReady() || !symbolId) return;
       markPreviewRequestStarted(symbolId);
-      alert((priority ? 'get-preview-priority:' : 'get-preview:') + symbolId);
+      const component = componentById.get(String(symbolId));
+      const payload = encodeURIComponent(JSON.stringify({
+        id: String(symbolId),
+        library: component ? component.library : null,
+        libraryName: component ? component.libraryName : '',
+        previewVersionTag: previewVersionById.get(String(symbolId)) || ''
+      }));
+      alert((priority ? 'get-preview-priority:' : 'get-preview:') + payload);
     }
 
     function dispatchNextPreviewRequest() {
-      if (!isBrowserActive || previewDispatchTimer || previewDispatchQueue.length === 0) {
+      if (!isPreviewPresentationReady() || previewDispatchTimer || previewDispatchQueue.length === 0) {
         return;
       }
 
@@ -1319,7 +686,7 @@
     }
 
     function enqueuePreviewRequest(symbolId, options) {
-      if (!isBrowserActive) return false;
+      if (!isPreviewPresentationReady()) return false;
       const requestOptions = options || {};
       const priority = requestOptions.priority === true;
       const allowRetry = requestOptions.allowRetry === true;
@@ -1359,25 +726,46 @@
       enqueuePreviewRequest(selectedSymbol.id, { priority: true, allowRetry: true });
     }
 
-    function requestPreviewsForVisibleItems() {
-      if (!isBrowserActive || isLoadingSymbols || !listContainer || filteredSymbols.length === 0) return;
-
-      requestPriorityPreviewForSelectedSymbol();
-
-      const { start, end } = getVirtRange();
-      for (let i = start; i < end; i++) {
-        const symbol = filteredSymbols[i];
-        if (!symbol || symbol.preview) {
-          continue;
-        }
-        enqueuePreviewRequest(symbol.id, { allowRetry: true });
+    function scheduleNextVisiblePreview(delayMs) {
+      if (previewIdleTimer) {
+        clearTimeout(previewIdleTimer);
+        previewIdleTimer = null;
       }
+      if (!isPreviewPresentationReady() || isLoadingSymbols || filteredSymbols.length === 0 || !listContainer) return;
+
+      previewIdleTimer = setTimeout(() => {
+        previewIdleTimer = null;
+        if (!isPreviewPresentationReady() || isLoadingSymbols || filteredSymbols.length === 0) return;
+
+        // Request the visible viewport together so the worker can share one
+        // document load between previews. Overscan must not delay visible rows.
+        const first = Math.max(0, Math.floor((listContainer.scrollTop - LIST_VERTICAL_PADDING) / ITEM_SLOT));
+        const end = Math.min(filteredSymbols.length, Math.ceil((listContainer.scrollTop + listContainer.clientHeight - LIST_VERTICAL_PADDING) / ITEM_SLOT));
+        let requested = 0;
+        for (let i = first; i < end && requested < 6; i++) {
+          const component = filteredSymbols[i];
+          if (!component || component.preview) continue;
+          if (enqueuePreviewRequest(component.id, { allowRetry: true })) requested++;
+        }
+      }, Number.isFinite(delayMs) ? delayMs : PREVIEW_IDLE_RENDER_DELAY_MS);
+    }
+
+    function requestPreviewsForVisibleItems() {
+      if (!isPreviewPresentationReady() || isLoadingSymbols || !listContainer || filteredSymbols.length === 0) return;
+      requestPriorityPreviewForSelectedSymbol();
+      scheduleNextVisiblePreview(PREVIEW_IDLE_RENDER_DELAY_MS);
     }
 
     window.setBrowserActive = function(active) {
       isBrowserActive = !!active;
+      resetNavigationHover();
 
       if (!isBrowserActive) {
+        browseWithoutQuery = false;
+        if (previewIdleTimer) {
+          clearTimeout(previewIdleTimer);
+          previewIdleTimer = null;
+        }
         if (previewDispatchTimer) {
           clearTimeout(previewDispatchTimer);
           previewDispatchTimer = null;
@@ -1390,11 +778,16 @@
         return;
       }
 
-      requestAnimationFrame(() => requestPreviewsForVisibleItems());
+      syncPresentation(false, true);
+      scheduleUIFrame(() => requestPreviewsForVisibleItems());
     };
     
     window.setLoading = function(loading) {
       isLoadingSymbols = !!loading;
+      if (isLoadingSymbols && previewIdleTimer) {
+        clearTimeout(previewIdleTimer);
+        previewIdleTimer = null;
+      }
       if (loadingEl) {
         loadingEl.style.display = loading ? 'flex' : 'none';
       }
@@ -1406,7 +799,7 @@
     };
 
     window.focusSearchInput = function(selectionMode) {
-      if (!searchInput) return;
+      if (!searchInput || document.body.classList.contains('mode-settings')) return;
 
       const mode = selectionMode || 'caret';
       searchInput.focus();
@@ -1427,14 +820,14 @@
       } catch (e) {}
     };
     
-    window.loadSymbols = function(symbols, savedState) {
+    window.loadSymbols = function(symbols, savedState, documentId) {
       console.log('loadSymbols called with', symbols ? symbols.length : 0, 'symbols');
       
       // Ensure DOM is ready
       if (!symbolsList || !loadingEl) {
         console.log('DOM not ready, retrying in 100ms...');
         setTimeout(function() {
-          window.loadSymbols(symbols, savedState);
+          window.loadSymbols(symbols, savedState, documentId);
         }, 100);
         return;
       }
@@ -1444,8 +837,37 @@
         : (typeof savedState === 'string'
           ? { query: savedState }
           : {});
+
+      const incomingDocumentId = documentId ? String(documentId) : loadedDocumentId;
+      const documentChanged = loadedDocumentId !== null && incomingDocumentId !== loadedDocumentId;
+      const restoreSavedSource = documentChanged || (!hasLoadedSymbols && !sourceFilterTouched);
+      if (documentChanged) {
+        previewById.clear();
+        previewVersionById.clear();
+        rowNodeCache.clear();
+        sourceFilterTouched = false;
+      }
+      loadedDocumentId = incomingDocumentId;
       
+      const previewsFromPreviousLoad = new Map();
+      allSymbols.forEach((component) => {
+        if (component && component.preview && component.id !== undefined) {
+          previewsFromPreviousLoad.set(String(component.id), component.preview);
+        }
+      });
       allSymbols = symbols || [];
+      allSymbols.forEach((component) => {
+        if (!component || component.id === undefined || component.preview) return;
+        const previousPreview = !documentChanged && (previewById.get(String(component.id)) || previewsFromPreviousLoad.get(String(component.id)));
+        if (previousPreview) component.preview = previousPreview;
+      });
+      componentById = new Map();
+      allSymbols.forEach((component) => {
+        if (component && component.id !== undefined) componentById.set(String(component.id), component);
+        if (component && component.preview) previewById.set(String(component.id), component.preview);
+      });
+      hasLoadedSymbols = true;
+      renderedRowSignature = '';
       isLoadingSymbols = false;
       requestedPreviews.clear();
       loadedPreviews.clear();
@@ -1470,11 +892,9 @@
       if (allSymbols.length === 0) {
         symbolsList.style.display = 'none';
         emptyState.style.display = 'block';
-        statsEl.textContent = 'No symbols found';
+        statsEl.textContent = 'No components found';
       } else {
-        const effectiveQuery = liveSearchQuery && liveSearchQuery.trim()
-          ? liveSearchQuery
-          : ((parsedSavedState.query && parsedSavedState.query.trim()) ? parsedSavedState.query : searchInput.value);
+        const effectiveQuery = searchTouched ? liveSearchQuery : (parsedSavedState.query || searchInput.value);
 
         if (searchInput.value !== effectiveQuery) {
           searchInput.value = effectiveQuery;
@@ -1482,8 +902,8 @@
         liveSearchQuery = searchInput.value;
         searchTouched = searchTouched || !!liveSearchQuery.trim();
 
-        if (parsedSavedState.sourceFilter) {
-          currentSourceFilter = parsedSavedState.sourceFilter;
+        if (restoreSavedSource) {
+          currentSourceFilter = parsedSavedState.sourceFilter || 'All';
         }
 
         renderSourceFilter();
@@ -1505,11 +925,12 @@
         window.focusSearchInput('smart');
       }
 
+      syncPresentation(false);
       requestPreviewsForVisibleItems();
     };
 
     function isDarkThemeEnabled() {
-      return !!(themeMediaQuery && themeMediaQuery.matches);
+      return document.body.dataset.theme === 'dark';
     }
 
     function getSymbolKindIconKey(symbol, isSelected) {
@@ -1543,12 +964,12 @@
       });
     }
     
-    function getVirtRange() {
+    function getVirtRange(requestedScrollTop) {
       const totalCount = filteredSymbols.length;
       if (!listContainer || totalCount === 0) {
         return { start: 0, end: 0, total: 0 };
       }
-      const scrollTop = Math.max(0, listContainer.scrollTop - LIST_VERTICAL_PADDING);
+      const scrollTop = Math.max(0, (Number.isFinite(requestedScrollTop) ? requestedScrollTop : listContainer.scrollTop) - LIST_VERTICAL_PADDING);
       const viewportHeight = listContainer.clientHeight;
       const rawStart = Math.floor(scrollTop / ITEM_SLOT) - VIRT_BUFFER;
       const rawEnd = Math.ceil((scrollTop + viewportHeight) / ITEM_SLOT) + VIRT_BUFFER;
@@ -1560,43 +981,98 @@
     }
 
     function renderSymbolItemHtml(symbol, index, isSelected, queryParts) {
-      const iconSvg = getSymbolKindIconSvg(symbol, isSelected);
       const previewColor = PLACEHOLDER_COLORS[symbol.colorIndex || 0];
       const previewInitial = escapeHtml(symbol.name.charAt(0).toUpperCase());
-      const thumbHtml = symbol.preview
-        ? `<div class="symbol-thumb has-preview" style="background-image: url('${symbol.preview}');"></div>`
+      const preview = previewById.get(String(symbol.id)) || symbol.preview;
+      const thumbHtml = preview
+        ? `<div class="symbol-thumb has-preview"><img class="symbol-preview" src="${escapeHtml(preview)}" alt="" decoding="async" draggable="false"></div>`
         : `<div class="symbol-thumb" style="background-color: ${previewColor};"><span class="symbol-thumb-initial">${previewInitial}</span></div>`;
       const displayName = escapeHtml(symbol.name).replace(/\//g, ' → ');
       const highlightedName = highlightMatches(displayName, queryParts);
-      return `<li class="symbol-item ${isSelected ? 'selected' : ''}" data-index="${index}" data-symbol-id="${symbol.id}" onclick="onItemClick(${index})">${thumbHtml}<div class="symbol-info"><div class="symbol-name">${highlightedName}</div><div class="symbol-library">${escapeHtml(symbol.libraryName || 'Local')}</div></div><span class="symbol-kind-badge">${iconSvg}</span></li>`;
+      const sourceLabel = !symbol.library ? 'Local document' : (symbol.libraryName || 'Library');
+      return `<li id="component-option-${index}" class="symbol-item ${isSelected ? 'selected' : ''}" role="option" aria-selected="${isSelected}" data-index="${index}" data-symbol-id="${escapeHtml(String(symbol.id))}" onclick="onItemClick(${index})" ondblclick="onItemAction(event,${index},false)">${thumbHtml}<div class="symbol-info"><div class="symbol-name">${highlightedName}</div><div class="symbol-library">${escapeHtml(sourceLabel)}</div></div><div class="item-actions"><button class="item-action" type="button" tabindex="-1" onclick="onItemAction(event,${index},false)">Insert <kbd class="key">⏎</kbd></button><button class="item-action" type="button" tabindex="-1" onclick="onItemAction(event,${index},true)">Replace <kbd class="key">⇧</kbd><span>+</span><kbd class="key">⏎</kbd></button></div></li>`;
     }
 
-    function renderSymbols() {
+    function getReusableRow(symbol, index, queryParts) {
+      const id = String(symbol.id);
+      let entry = rowNodeCache.get(id);
+      if (!entry) {
+        const template = document.createElement('template');
+        template.innerHTML = renderSymbolItemHtml(symbol, index, index === selectedIndex, queryParts);
+        const node = template.content.firstElementChild;
+        node.onclick = () => onItemClick(Number(node.dataset.index));
+        node.ondblclick = event => onItemAction(event, Number(node.dataset.index), false);
+        const actions = node.querySelectorAll('.item-action');
+        actions[0].onclick = event => onItemAction(event, Number(node.dataset.index), false);
+        actions[1].onclick = event => onItemAction(event, Number(node.dataset.index), true);
+        entry = { node: node, nameKey: null, source: null };
+      }
+      rowNodeCache.delete(id);
+      rowNodeCache.set(id, entry);
+      const node = entry.node;
+      const nameKey = symbol.name + '\u0000' + queryParts.join('\u0000');
+      if (entry.nameKey !== nameKey) {
+        node.querySelector('.symbol-name').innerHTML = highlightMatches(escapeHtml(symbol.name).replace(/\//g, ' → '), queryParts);
+        entry.nameKey = nameKey;
+      }
+      const source = !symbol.library ? 'Local document' : (symbol.libraryName || 'Library');
+      if (entry.source !== source) {
+        node.querySelector('.symbol-library').textContent = source;
+        entry.source = source;
+      }
+      node.id = 'component-option-' + index;
+      node.dataset.index = String(index);
+      node.classList.toggle('selected', index === selectedIndex);
+      node.setAttribute('aria-selected', String(index === selectedIndex));
+      return node;
+    }
+
+    function renderSymbols(requestedScrollTop) {
       const query = searchInput.value.toLowerCase().trim();
       const queryParts = query ? query.replace(/[\/\-_]/g, ' ').split(/\s+/).filter(p => p.length > 0) : [];
 
-      const { start, end, total } = getVirtRange();
+      const { start, end, total } = getVirtRange(requestedScrollTop);
       if (total === 0) {
-        symbolsList.innerHTML = '';
+        symbolsList.textContent = '';
+        renderedRowSignature = '';
         return;
       }
 
+      const signature = currentSourceFilter + '\u0000' + query + '\u0000' + total + ':' + start + ':' + end + ':' +
+        filteredSymbols.slice(start, end).map(symbol => String(symbol.id)).join(',');
+      if (signature === renderedRowSignature) return;
+      renderedRowSignature = signature;
+
       const topPad = start * ITEM_SLOT;
       const bottomPad = (total - end) * ITEM_SLOT;
-      const parts = [];
-      if (topPad > 0) parts.push(`<li class="virt-spacer" style="height:${topPad}px"></li>`);
+      const fragment = document.createDocumentFragment();
+      function appendSpacer(height) {
+        if (height <= 0) return;
+        const spacer = document.createElement('li');
+        spacer.className = 'virt-spacer';
+        spacer.style.height = height + 'px';
+        fragment.appendChild(spacer);
+      }
+      appendSpacer(topPad);
       for (let i = start; i < end; i++) {
         const symbol = filteredSymbols[i];
-        parts.push(renderSymbolItemHtml(symbol, i, i === selectedIndex, queryParts));
+        fragment.appendChild(getReusableRow(symbol, i, queryParts));
       }
-      if (bottomPad > 0) parts.push(`<li class="virt-spacer" style="height:${bottomPad}px"></li>`);
-      symbolsList.innerHTML = parts.join('');
+      appendSpacer(bottomPad);
+      symbolsList.textContent = '';
+      symbolsList.appendChild(fragment);
+      if (rowNodeCache.size > ROW_NODE_CACHE_LIMIT) {
+        for (const [id, entry] of rowNodeCache) {
+          if (rowNodeCache.size <= ROW_NODE_CACHE_LIMIT) break;
+          if (entry.node.parentNode !== symbolsList) rowNodeCache.delete(id);
+        }
+      }
     }
 
     function scheduleVirtRender() {
       if (virtScrollRafQueued) return;
       virtScrollRafQueued = true;
-      requestAnimationFrame(() => {
+      scheduleUIFrame(() => {
         virtScrollRafQueued = false;
         renderSymbols();
         requestPreviewsForVisibleItems();
@@ -1604,23 +1080,16 @@
     }
 
     function updateSelectedItemDOM(previousIndex, nextIndex) {
-      if (previousIndex === nextIndex) return;
-
-      if (previousIndex >= 0) {
-        const previousEl = symbolsList.querySelector(`.symbol-item[data-index="${previousIndex}"]`);
-        if (previousEl) {
-          previousEl.classList.remove('selected');
-          updateKindBadgeForListItem(previousEl, previousIndex, false);
-        }
-      }
-
-      if (nextIndex >= 0) {
-        const nextEl = symbolsList.querySelector(`.symbol-item[data-index="${nextIndex}"]`);
-        if (nextEl) {
-          nextEl.classList.add('selected');
-          updateKindBadgeForListItem(nextEl, nextIndex, true);
-        }
-      }
+      searchInput.setAttribute('aria-activedescendant', nextIndex >= 0 ? 'component-option-' + nextIndex : '');
+      // A scroll can keep exactly the same virtual range, especially at the
+      // bottom. Reconcile selection even when renderSymbols reuses its rows.
+      symbolsList.querySelectorAll('.symbol-item').forEach(item => {
+        const index = Number(item.dataset.index);
+        const active = index === nextIndex;
+        item.classList.toggle('selected', active);
+        item.setAttribute('aria-selected', String(active));
+        updateKindBadgeForListItem(item, index, active);
+      });
     }
 
     function scrollIndexIntoView(index) {
@@ -1656,9 +1125,8 @@
 
       if (scrolled) {
         renderSymbols();
-      } else {
-        updateSelectedItemDOM(previousIndex, selectedIndex);
       }
+      updateSelectedItemDOM(previousIndex, selectedIndex);
 
       requestPreviewsForVisibleItems();
     }
@@ -1692,7 +1160,7 @@
     
     function updateStats() {
       if (filteredSymbols.length === allSymbols.length) {
-        statsEl.textContent = `${allSymbols.length} symbols`;
+        statsEl.textContent = `${allSymbols.length} components`;
       } else {
         statsEl.textContent = `${filteredSymbols.length} of ${allSymbols.length}`;
       }
@@ -1719,7 +1187,10 @@
       
       sourceFilter.innerHTML = availableSources.map(source => {
         const isActive = source === currentSourceFilter;
-        return `<button class="source-btn ${isActive ? 'active' : ''}" data-source="${source}" onclick="onSourceClick('${source}')">${source}</button>`;
+        const label = source === 'Local' ? 'Local Document' : source;
+        const icon = source === 'All' ? '<img src="../Resources/redesign/source-all.svg" alt="">' :
+          (source === 'Local' ? '<img src="../Resources/redesign/source-local.svg" alt="">' : '');
+        return `<button class="source-btn ${isActive ? 'active' : ''}" role="tab" aria-selected="${isActive}" data-source="${escapeHtml(source)}" onclick="onSourceClick(this.dataset.source)">${icon}${escapeHtml(label)}</button>`;
       }).join('');
 
       scrollActiveSourceIntoView();
@@ -1741,6 +1212,7 @@
     }
 
     function onSourceClick(source) {
+      sourceFilterTouched = true;
       currentSourceFilter = source;
       renderSourceFilter();
       applyFilters();
@@ -1760,7 +1232,17 @@
       }
 
       const query = searchInput.value.toLowerCase().trim();
-      
+      syncPresentation(true);
+      if (!query && !browseWithoutQuery && !(window.UPDATE_NOTICE && window.UPDATE_NOTICE.visible)) {
+        filteredSymbols = [];
+        selectedIndex = -1;
+        symbolsList.textContent = '';
+        renderedRowSignature = '';
+        emptyState.style.display = 'none';
+        updateStats();
+        return;
+      }
+
       // Save currently selected symbol ID before filtering
       const previousSelectedId = selectedIndex >= 0 && filteredSymbols[selectedIndex] 
         ? filteredSymbols[selectedIndex].id 
@@ -1815,17 +1297,11 @@
       // the subsequent scrollTop assignment can land at the requested position.
       // The scroll event from that assignment will fire scheduleVirtRender to
       // redraw the now-visible items.
-      renderSymbols();
+      const nextScrollTop = Number.isFinite(filterOptions.scrollTop) ? filterOptions.scrollTop : 0;
+      renderSymbols(nextScrollTop);
+      if (listContainer) listContainer.scrollTop = nextScrollTop;
 
-      if (listContainer) {
-        if (Number.isFinite(filterOptions.scrollTop)) {
-          listContainer.scrollTop = filterOptions.scrollTop;
-        } else {
-          listContainer.scrollTop = 0;
-        }
-      }
-
-      requestAnimationFrame(() => {
+      scheduleUIFrame(() => {
         requestPreviewsForVisibleItems();
       });
     }
@@ -1843,22 +1319,40 @@
     }
     
     function updatePreviewThumbnailInList(symbolId, previewData) {
-      const listItem = symbolsList.querySelector(`.symbol-item[data-symbol-id="${symbolId}"]`);
+      const cachedRow = rowNodeCache.get(String(symbolId));
+      const listItem = cachedRow ? cachedRow.node : symbolsList.querySelector(`.symbol-item[data-symbol-id="${symbolId}"]`);
       if (!listItem) return;
       const thumb = listItem.querySelector('.symbol-thumb');
       if (!thumb) return;
 
-      thumb.style.backgroundImage = `url('${previewData}')`;
-      thumb.style.backgroundColor = 'transparent';
+      thumb.classList.add('has-preview');
+      thumb.style.backgroundImage = '';
+      thumb.style.backgroundColor = '';
       const initial = thumb.querySelector('.symbol-thumb-initial');
       if (initial) {
         initial.remove();
       }
+      let image = thumb.querySelector('.symbol-preview');
+      if (!image) {
+        image = document.createElement('img');
+        image.className = 'symbol-preview';
+        image.alt = '';
+        image.decoding = 'async';
+        image.draggable = false;
+        thumb.appendChild(image);
+      }
+      if (image.getAttribute('src') !== previewData) image.src = previewData;
     }
     
     function onItemClick(index) {
       setSelectedIndex(index, false);
-      insertSymbol(filteredSymbols[selectedIndex].id, false);
+      searchInput.focus();
+    }
+
+    function onItemAction(event, index, replace) {
+      event.stopPropagation();
+      setSelectedIndex(index, false);
+      if (filteredSymbols[selectedIndex]) insertSymbol(filteredSymbols[selectedIndex].id, replace);
     }
     
     function selectSymbol(index) {
@@ -1880,7 +1374,10 @@
     searchInput.addEventListener('input', (e) => {
       liveSearchQuery = e.target.value;
       searchTouched = true;
+      browseWithoutQuery = false;
+      syncPresentation(true);
       clearTimeout(searchTimeout);
+      if (!liveSearchQuery.trim()) { applyFilters(); return; }
 
       if (isLoadingSymbols && allSymbols.length === 0) {
         return;
@@ -1888,9 +1385,12 @@
 
       searchTimeout = setTimeout(() => {
         applyFilters();
-      }, 150);
+      }, 60);
     });
     
+    // Pause preview work when the native panel is hidden.
+    document.addEventListener('visibilitychange', resetNavigationHover);
+
     // On scroll: re-render the virtualized list (with the new visible window)
     // and re-request previews. Throttled via rAF inside scheduleVirtRender.
     listContainer.addEventListener('scroll', () => {
@@ -1905,7 +1405,7 @@
 
     if (themeMediaQuery) {
       const handleThemeChange = () => {
-        refreshKindBadgesInList();
+        applyAppearance();
       };
 
       if (typeof themeMediaQuery.addEventListener === 'function') {
@@ -1915,8 +1415,19 @@
       }
     }
     
-    // Keyboard navigation - works globally
+    // Keep browser shortcuts out of settings controls and shortcut recording.
     document.addEventListener('keydown', (e) => {
+      if (isRecordingHotkey || e.isComposing) return;
+      if (presentationState === 'compact' && !e.metaKey && !e.ctrlKey && !e.altKey &&
+          (e.key === 'ArrowDown' || e.key === 'Tab')) {
+        e.preventDefault();
+        browseWithoutQuery = true;
+        syncPresentation(true);
+        applyFilters();
+        searchInput.focus();
+        return;
+      }
+      if ((presentationState !== 'results') && e.key !== 'Escape') return;
       // Ignore if typing in search (except for special keys)
       if (e.target === searchInput && e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter' && e.key !== 'Escape' && e.key !== 'Tab') {
         return;
@@ -1946,7 +1457,7 @@
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        alert('close-browser:' + getUiStatePayload());
+        alert('close-browser-animated:' + getUiStatePayload());
       } else if (e.key === 'Tab') {
         e.preventDefault();
         if (e.shiftKey) {
@@ -1957,36 +1468,105 @@
       }
     });
     
-    // Window dragging via search input
-    let isDragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
+    // The panel can be dragged from anywhere. Wait for a small movement so
+    // ordinary clicks, input focus, and caret placement keep their usual feel.
+    let dragCandidate = null;
+    let activeWindowDrag = false;
+    let suppressClickTarget = null;
+    let suppressClickUntil = 0;
+    const windowDragThreshold = 5;
 
-    searchInput.addEventListener('mousedown', (e) => {
-      isDragging = true;
-      dragStartX = e.screenX;
-      dragStartY = e.screenY;
-      searchInput.classList.add('dragging');
-      e.preventDefault();
-    });
-    
-    document.addEventListener('mousemove', (e) => {
-      if (isDragging) {
-        const dx = e.screenX - dragStartX;
-        const dy = e.screenY - dragStartY;
-        alert('drag-window:' + dx + ':' + dy);
-        dragStartX = e.screenX;
-        dragStartY = e.screenY;
+    document.addEventListener('mousedown', event => {
+      if (event.button !== 0) return;
+      dragCandidate = {
+        startX: event.screenX,
+        startY: event.screenY,
+        lastX: event.screenX,
+        lastY: event.screenY,
+        input: event.target.closest('input, textarea'),
+        inputSelectionStart: event.target.closest('input, textarea')
+          ? event.target.closest('input, textarea').selectionStart
+          : null,
+        inputSelectionEnd: event.target.closest('input, textarea')
+          ? event.target.closest('input, textarea').selectionEnd
+          : null,
+        inputSelectionDirection: event.target.closest('input, textarea')
+          ? event.target.closest('input, textarea').selectionDirection
+          : null,
+        clickTarget: event.target.closest('button, input, textarea, select, a, [role="button"], [role="tab"], .symbol-item, .preserve-dims-checkbox')
+      };
+      activeWindowDrag = false;
+    }, true);
+
+    document.addEventListener('mousemove', event => {
+      if (!dragCandidate) return;
+      if (event.buttons !== undefined && event.buttons !== 1) {
+        dragCandidate = null;
+        activeWindowDrag = false;
+        document.body.classList.remove('is-window-dragging');
+        return;
       }
-    });
-    
+
+      const totalX = event.screenX - dragCandidate.startX;
+      const totalY = event.screenY - dragCandidate.startY;
+      if (!activeWindowDrag
+        && Math.sqrt(totalX * totalX + totalY * totalY) < windowDragThreshold) return;
+
+      if (!activeWindowDrag) alert('finish-window-transition');
+      activeWindowDrag = true;
+      document.body.classList.add('is-window-dragging');
+      event.preventDefault();
+      if (dragCandidate.input && dragCandidate.inputSelectionStart !== null) {
+        try {
+          dragCandidate.input.setSelectionRange(
+            dragCandidate.inputSelectionStart,
+            dragCandidate.inputSelectionEnd,
+            dragCandidate.inputSelectionDirection
+          );
+        } catch (e) {}
+      }
+      if (document.getSelection) {
+        const selection = document.getSelection();
+        if (selection && !selection.isCollapsed) selection.removeAllRanges();
+      }
+
+      const dx = event.screenX - dragCandidate.lastX;
+      const dy = event.screenY - dragCandidate.lastY;
+      if (dx || dy) alert('drag-window:' + dx + ':' + dy);
+      dragCandidate.lastX = event.screenX;
+      dragCandidate.lastY = event.screenY;
+    }, true);
+
     document.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        searchInput.classList.remove('dragging');
+      if (activeWindowDrag && dragCandidate && dragCandidate.clickTarget) {
+        suppressClickTarget = dragCandidate.clickTarget;
+        suppressClickUntil = Date.now() + 120;
       }
+      dragCandidate = null;
+      activeWindowDrag = false;
+      document.body.classList.remove('is-window-dragging');
+    }, true);
+
+    document.addEventListener('click', event => {
+      if (!suppressClickTarget) return;
+      const target = event.target;
+      const sameControl = target === suppressClickTarget
+        || suppressClickTarget.contains(target)
+        || target.contains(suppressClickTarget);
+      if (Date.now() <= suppressClickUntil && sameControl) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      suppressClickTarget = null;
+      suppressClickUntil = 0;
+    }, true);
+
+    window.addEventListener('blur', () => {
+      dragCandidate = null;
+      activeWindowDrag = false;
+      document.body.classList.remove('is-window-dragging');
     });
-    
+
     function getUiStatePayload() {
       const selectedSymbol = selectedIndex >= 0 && filteredSymbols[selectedIndex]
         ? filteredSymbols[selectedIndex]

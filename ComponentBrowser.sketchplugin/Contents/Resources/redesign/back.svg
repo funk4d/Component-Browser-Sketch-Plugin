@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32px" height="32px" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>back</title>
+    <defs>
+        <path d="M12,0 L20,0 C26.627417,0 32,5.372583 32,12 L32,20 C32,26.627417 26.627417,32 20,32 L12,32 C5.372583,32 0,26.627417 0,20 L0,12 C0,5.372583 5.372583,0 12,0 Z" id="path-1"></path>
+    </defs>
+    <g id="Graphic-2" stroke="none" fill="none" xlink:href="#path-1" fill-rule="evenodd">
+        <use fill="#535DFF" xlink:href="#path-1"></use>
+        <g id="arrow-left-long-line" transform="translate(4, 4)" fill="#FFFFFF">
+            <polygon id="Path" points="22.0003 13.0001 22.0004 11.0002 5.82845 11.0002 9.77817 7.05044 8.36396 5.63623 2 12.0002 8.36396 18.3642 9.77817 16.9499 5.8284 13.0002"></polygon>
+        </g>
+    </g>
+</svg>
